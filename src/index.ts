@@ -7,15 +7,17 @@
  * Usage:
  *   npx ascii-motion-mcp                    # Start in stdio mode
  *   npx ascii-motion-mcp --project-dir ./   # Specify project directory
+ *   npx ascii-motion-mcp --live             # Enable live browser sync
  *   npx ascii-motion-mcp --help             # Show help
  * 
  * For MCP Inspector testing:
- *   npx @modelcontextprotocol/inspector ./dist/index.js
+ *   npx @modelcontextprotocol/inspector /path/to/run-server.sh
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { getProjectManager } from './state.js';
+import { getProjectManager, setWebSocketBroadcaster } from './state.js';
+import { HybridTransport } from './transport/index.js';
 import {
   registerCanvasTools,
   registerFrameTools,
@@ -30,6 +32,8 @@ import {
   registerAdditionalExportTools,
   registerImportTools,
 } from './tools/index.js';
+import { registerResources } from './resources/index.js';
+import { registerPrompts } from './prompts/index.js';
 
 // =============================================================================
 // CLI Argument Parsing
@@ -39,6 +43,8 @@ interface CLIOptions {
   projectDir: string;
   help: boolean;
   version: boolean;
+  live: boolean;
+  port: number;
 }
 
 function parseArgs(): CLIOptions {
@@ -47,6 +53,8 @@ function parseArgs(): CLIOptions {
     projectDir: process.cwd(),
     help: false,
     version: false,
+    live: false,
+    port: 9876,
   };
   
   for (let i = 0; i < args.length; i++) {
@@ -60,6 +68,13 @@ function parseArgs(): CLIOptions {
       const nextArg = args[++i];
       if (nextArg) {
         options.projectDir = nextArg;
+      }
+    } else if (arg === '--live' || arg === '-l') {
+      options.live = true;
+    } else if (arg === '--port' || arg === '-p') {
+      const nextArg = args[++i];
+      if (nextArg) {
+        options.port = parseInt(nextArg, 10);
       }
     }
   }
@@ -81,6 +96,8 @@ OPTIONS:
   -v, --version           Show version number
   -d, --project-dir PATH  Set the project directory for file operations
                           (default: current working directory)
+  -l, --live              Enable live browser sync via WebSocket
+  -p, --port PORT         WebSocket port for live mode (default: 9876)
 
 ENVIRONMENT VARIABLES:
   ASCII_MOTION_PROJECT_DIR  Alternative way to set project directory
@@ -92,74 +109,23 @@ EXAMPLES:
   # Start server with specific project directory
   ascii-motion-mcp --project-dir ./my-projects
 
+  # Enable live browser sync
+  ascii-motion-mcp --live --port 9876
+
   # Test with MCP Inspector
-  npx @modelcontextprotocol/inspector ./dist/index.js
+  npx @modelcontextprotocol/inspector /path/to/run-server.sh
 
-MCP CLIENT CONFIGURATION:
+LIVE MODE:
+  When --live is enabled, a WebSocket server starts on 127.0.0.1.
+  The auth token is printed to stderr. Use this token to connect
+  your browser to the MCP server for real-time synchronization.
 
-  For Claude Desktop (claude_desktop_config.json):
-  {
-    "mcpServers": {
-      "ascii-motion": {
-        "command": "npx",
-        "args": ["ascii-motion-mcp", "--project-dir", "/path/to/projects"]
-      }
-    }
-  }
+  Connect URL: ws://127.0.0.1:PORT/?token=AUTH_TOKEN
 
-  For VS Code Copilot (settings.json):
-  {
-    "mcp": {
-      "servers": {
-        "ascii-motion": {
-          "command": "npx",
-          "args": ["ascii-motion-mcp", "--project-dir", "/path/to/projects"]
-        }
-      }
-    }
-  }
-
-AVAILABLE TOOLS:
-  Canvas Operations:
-    - get_cell, set_cell, clear_cell, set_cells_batch
-    - paste_ascii_block, fill_region, resize_canvas, clear_canvas
-  
-  Frame Management:
-    - list_frames, add_frame, delete_frame, duplicate_frame
-    - go_to_frame, set_frame_duration, set_frame_name
-  
-  Project Management:
-    - new_project, save_project, load_project
-    - get_project_info, set_project_name, list_project_files
-  
-  Preview (Token-Efficient):
-    - get_canvas_summary, get_canvas_preview, get_canvas_ascii
-    - get_frame_diff, describe_animation
-  
-  Animation Workflows:
-    - copy_frame_and_modify, shift_frame_content, flip_region
-    - copy_region_to_frame, interpolate_frames
-  
-  Selection:
-    - select_rectangle, select_by_color, get_selection
-    - clear_selection, apply_to_selection, delete_selection_content
-  
-  History:
-    - undo, redo, get_history_status
-
-  Export:
-    - export_text, export_json, export_session, export_html
-    - export_react, export_ansi, export_ink, export_bubbletea
-    - export_opentui, export_image, export_video
-
-  Import:
-    - import_image, import_video, import_ascii_text
-
-  Effects:
-    - apply_effect, get_color_stats, batch_recolor, batch_replace_char
-
-  Generators:
-    - run_generator, preview_generator
+AVAILABLE TOOLS (60 total):
+  Canvas (8), Frames (7), Project (6), Preview (5), Animation (5),
+  Selection (6), History (3), Export (11), Import (3), Effects (4),
+  Generators (2)
 
 For detailed documentation, visit:
   https://github.com/CameronFoxly/ascii-motion-mcp
@@ -167,7 +133,7 @@ For detailed documentation, visit:
 }
 
 function showVersion(): void {
-  console.log('ascii-motion-mcp v0.1.0-alpha.1');
+  console.log('ascii-motion-mcp v0.2.0-alpha.1');
 }
 
 // =============================================================================
@@ -193,7 +159,7 @@ async function main(): Promise<void> {
   // Create the MCP server
   const server = new McpServer({
     name: 'ascii-motion-mcp',
-    version: '0.1.0-alpha.1',
+    version: '0.2.0-alpha.1',
   });
   
   // Register all tools
@@ -210,18 +176,59 @@ async function main(): Promise<void> {
   registerAdditionalExportTools(server);
   registerImportTools(server);
   
+  // Register resources
+  registerResources(server);
+  
+  // Register prompts
+  registerPrompts(server);
+  
   // Initialize project manager
   getProjectManager();
+  
+  // Set up live mode if enabled
+  let hybridTransport: HybridTransport | null = null;
+  
+  if (options.live) {
+    hybridTransport = new HybridTransport(options.port, '127.0.0.1');
+    
+    // Set up WebSocket broadcaster for state changes
+    setWebSocketBroadcaster((type, data) => {
+      hybridTransport?.broadcastStateChange(type, data);
+    });
+    
+    // Start WebSocket server
+    await hybridTransport.startWebSocket();
+    
+    console.error(`[ascii-motion-mcp] Live mode enabled`);
+    console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
+    console.error(`[ascii-motion-mcp] Auth Token: ${hybridTransport.authToken}`);
+    console.error(`[ascii-motion-mcp] Session ID: ${hybridTransport.sessionId}`);
+    console.error('');
+    console.error(`[ascii-motion-mcp] Browser connect URL:`);
+    console.error(`  ws://127.0.0.1:${options.port}/?token=${hybridTransport.authToken}`);
+  }
   
   // Log startup (to stderr so it doesn't interfere with MCP protocol)
   console.error(`[ascii-motion-mcp] Starting server...`);
   console.error(`[ascii-motion-mcp] Project directory: ${options.projectDir}`);
   
-  // Connect via stdio transport
+  // Connect via stdio transport (for MCP protocol)
   const transport = new StdioServerTransport();
   await server.connect(transport);
   
   console.error(`[ascii-motion-mcp] Server connected and ready`);
+  
+  // Handle shutdown
+  const shutdown = async () => {
+    console.error('[ascii-motion-mcp] Shutting down...');
+    if (hybridTransport) {
+      await hybridTransport.stopWebSocket();
+    }
+    process.exit(0);
+  };
+  
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 // Handle uncaught errors

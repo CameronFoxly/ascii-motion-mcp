@@ -820,3 +820,20 @@ export function getProjectManager(): ProjectStateManager {
 export function resetProjectManager(): void {
   projectManager = new ProjectStateManager();
 }
+
+// ============================================================================
+// WebSocket Broadcaster
+// ============================================================================
+
+type BroadcasterFn = (type: string, data: unknown) => void;
+let wsBroadcaster: BroadcasterFn | null = null;
+
+export function setWebSocketBroadcaster(broadcaster: BroadcasterFn): void {
+  wsBroadcaster = broadcaster;
+}
+
+export function broadcastStateChange(type: string, data: unknown): void {
+  if (wsBroadcaster) {
+    wsBroadcaster(type, data);
+  }
+}
