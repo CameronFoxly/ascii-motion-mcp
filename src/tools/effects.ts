@@ -11,7 +11,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { parseCellKey, createCellKey, type Cell } from '../types.js';
 
 export function registerEffectsTools(server: McpServer): void {
@@ -237,6 +237,8 @@ export function registerEffectsTools(server: McpServer): void {
         pm.setCell(mod.x, mod.y, mod.cell);
       }
       
+      // Broadcast effect applied
+      broadcastStateChange('apply_effect', { effect, cellsModified: modifiedCount });
       return {
         content: [{ 
           type: 'text', 
@@ -355,6 +357,8 @@ export function registerEffectsTools(server: McpServer): void {
         }
       }
       
+      // Broadcast recolor completed
+      broadcastStateChange('batch_recolor', { oldColor, newColor, cellsModified: replacedCount });
       return {
         content: [{ 
           type: 'text', 
@@ -404,6 +408,8 @@ export function registerEffectsTools(server: McpServer): void {
         }
       }
       
+      // Broadcast replace char completed
+      broadcastStateChange('batch_replace_char', { oldChar, newChar, cellsModified: replacedCount });
       return {
         content: [{ 
           type: 'text', 

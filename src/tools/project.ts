@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { SessionDataSchema } from '../types.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -80,6 +80,14 @@ export function registerProjectTools(server: McpServer): void {
       pm.newProject({ width: finalWidth, height: finalHeight, name });
       
       const state = pm.getState();
+      
+      // Broadcast state change to connected browsers
+      broadcastStateChange('new_project', { 
+        width: state.width, 
+        height: state.height, 
+        name: state.name,
+        backgroundColor: state.backgroundColor 
+      });
       
       return {
         content: [{ 

@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { isInBounds } from '../types.js';
 
 export function registerCanvasTools(server: McpServer): void {
@@ -93,6 +93,9 @@ export function registerCanvasTools(server: McpServer): void {
       
       pm.setCell(x, y, newCell);
       
+      // Broadcast state change to connected browsers
+      broadcastStateChange('set_cell', { x, y, cell: newCell });
+      
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, x, y, cell: newCell }) }],
       };
@@ -121,6 +124,9 @@ export function registerCanvasTools(server: McpServer): void {
       }
       
       pm.clearCell(x, y);
+      
+      // Broadcast state change to connected browsers
+      broadcastStateChange('clear_cell', { x, y });
       
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, x, y }) }],
@@ -169,6 +175,9 @@ export function registerCanvasTools(server: McpServer): void {
       }
       
       const count = pm.setCells(toSet);
+      
+      // Broadcast state change to connected browsers
+      broadcastStateChange('set_cells_batch', { cells: toSet });
       
       return {
         content: [{ 
@@ -285,6 +294,9 @@ export function registerCanvasTools(server: McpServer): void {
         matchBgColor,
       });
       
+      // Broadcast state change to connected browsers
+      broadcastStateChange('fill_region', { cellsFilled });
+      
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, cellsFilled }) }],
       };
@@ -308,6 +320,9 @@ export function registerCanvasTools(server: McpServer): void {
       const previousHeight = previousState.height;
       
       pm.resizeCanvas(width, height);
+      
+      // Broadcast state change to connected browsers
+      broadcastStateChange('resize_canvas', { width, height });
       
       const newState = pm.getState();
       
@@ -336,6 +351,9 @@ export function registerCanvasTools(server: McpServer): void {
       const previousCellCount = Object.keys(pm.getCurrentFrame().data).length;
       
       pm.clearCanvas();
+      
+      // Broadcast state change to connected browsers
+      broadcastStateChange('clear_canvas', {});
       
       return {
         content: [{ 

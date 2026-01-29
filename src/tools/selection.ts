@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { parseCellKey, createCellKey, isInBounds, type Cell, type Selection } from '../types.js';
 
 export function registerSelectionTools(server: McpServer): void {
@@ -40,6 +40,8 @@ export function registerSelectionTools(server: McpServer): void {
       
       pm.setSelection(selection);
       
+      // Broadcast selection
+      broadcastStateChange('select_rectangle', { x: clampedX, y: clampedY, width: clampedWidth, height: clampedHeight });
       // Count cells in selection
       const frame = pm.getCurrentFrame();
       let cellCount = 0;
@@ -268,6 +270,8 @@ export function registerSelectionTools(server: McpServer): void {
       
       pm.clearSelection();
       
+      // Broadcast selection cleared
+      broadcastStateChange('clear_selection', {});
       return {
         content: [{ 
           type: 'text', 

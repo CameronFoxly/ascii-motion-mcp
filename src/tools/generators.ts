@@ -11,7 +11,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { type Cell } from '../types.js';
 
 // Character sets for different generators
@@ -372,6 +372,8 @@ export function registerGeneratorTools(server: McpServer): void {
         }
       }
       
+      // Broadcast generator completed
+      broadcastStateChange('run_generator', { generator, framesGenerated: frames.length });
       return {
         content: [{ 
           type: 'text', 

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 
 export function registerImportTools(server: McpServer): void {
   // ==========================================================================
@@ -148,6 +148,8 @@ export function registerImportTools(server: McpServer): void {
           pm.setCell(cell.x, cell.y, { char: cell.char, color: cell.color, bgColor: cell.bgColor });
         }
         
+          // Broadcast import completed
+          broadcastStateChange('import_image', { cellsCreated: cellsToSet.length });
         return {
           content: [{ 
             type: 'text', 
@@ -385,6 +387,8 @@ export function registerImportTools(server: McpServer): void {
         }
       }
       
+      // Broadcast import completed
+      broadcastStateChange('import_ascii_text', { cellsSet });
       return {
         content: [{ 
           type: 'text', 

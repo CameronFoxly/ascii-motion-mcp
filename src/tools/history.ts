@@ -6,7 +6,7 @@
 
 // z is used implicitly via McpServer
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 
 export function registerHistoryTools(server: McpServer): void {
   // ==========================================================================
@@ -29,6 +29,8 @@ export function registerHistoryTools(server: McpServer): void {
       const description = info.undoDescription;
       const success = pm.undo();
       
+      // Broadcast undo
+      if (success) broadcastStateChange('undo', {});
       return {
         content: [{ 
           type: 'text', 
@@ -63,6 +65,8 @@ export function registerHistoryTools(server: McpServer): void {
       const description = info.redoDescription;
       const success = pm.redo();
       
+      // Broadcast redo
+      if (success) broadcastStateChange('redo', {});
       return {
         content: [{ 
           type: 'text', 

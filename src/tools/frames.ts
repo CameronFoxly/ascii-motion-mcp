@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 
 export function registerFrameTools(server: McpServer): void {
   // ==========================================================================
@@ -79,6 +79,8 @@ export function registerFrameTools(server: McpServer): void {
       }
       
       const updatedState = pm.getState();
+      // Broadcast frame added
+      broadcastStateChange('add_frame', { frame: newFrame, totalFrames: updatedState.frames.length });
       
       return {
         content: [{ 
@@ -129,6 +131,8 @@ export function registerFrameTools(server: McpServer): void {
       const success = pm.deleteFrame(index);
       
       const updatedState = pm.getState();
+      // Broadcast frame deleted
+      broadcastStateChange('delete_frame', { index, totalFrames: updatedState.frames.length });
       
       return {
         content: [{ 
@@ -177,6 +181,8 @@ export function registerFrameTools(server: McpServer): void {
       }
       
       const updatedState = pm.getState();
+      // Broadcast frame duplicated
+      broadcastStateChange('duplicate_frame', { newFrame, totalFrames: updatedState.frames.length });
       
       return {
         content: [{ 
@@ -221,6 +227,9 @@ export function registerFrameTools(server: McpServer): void {
       const success = pm.goToFrame(index);
       const frame = pm.getCurrentFrame();
       
+      // Broadcast frame change
+      broadcastStateChange('go_to_frame', { index });
+      
       return {
         content: [{ 
           type: 'text', 
@@ -263,6 +272,8 @@ export function registerFrameTools(server: McpServer): void {
       const previousDuration = state.frames[index].duration;
       const success = pm.setFrameDuration(index, duration);
       
+      // Broadcast duration change
+      broadcastStateChange('set_frame_duration', { index, duration });
       return {
         content: [{ 
           type: 'text', 
@@ -301,6 +312,8 @@ export function registerFrameTools(server: McpServer): void {
       const previousName = state.frames[index].name;
       const success = pm.setFrameName(index, name);
       
+      // Broadcast name change
+      broadcastStateChange('set_frame_name', { index, name });
       return {
         content: [{ 
           type: 'text', 

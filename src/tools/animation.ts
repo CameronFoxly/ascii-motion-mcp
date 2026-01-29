@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager } from '../state.js';
+import { getProjectManager, broadcastStateChange } from '../state.js';
 import { parseCellKey, createCellKey, isInBounds, type Cell, type CanvasData } from '../types.js';
 
 export function registerAnimationTools(server: McpServer): void {
@@ -87,6 +87,18 @@ export function registerAnimationTools(server: McpServer): void {
       
       const updatedState = pm.getState();
       
+      // Broadcast the new frame with all its data
+      broadcastStateChange('copy_frame_and_modify', {
+        newFrame: {
+          index: newIndex,
+          id: newFrame.id,
+          name: updatedState.frames[newIndex].name,
+          duration: updatedState.frames[newIndex].duration,
+          data: updatedState.frames[newIndex].data,
+        },
+        totalFrames: updatedState.frames.length,
+      });
+      
       return {
         content: [{ 
           type: 'text', 
@@ -161,6 +173,8 @@ export function registerAnimationTools(server: McpServer): void {
       // Replace frame data
       frame.data = newData;
       
+      // Broadcast shift completed
+      broadcastStateChange('shift_frame_content', { dx, dy, cellsShifted });
       return {
         content: [{ 
           type: 'text', 
@@ -238,6 +252,8 @@ export function registerAnimationTools(server: McpServer): void {
         frame.data[createCellKey(newX, newY)] = cell;
       }
       
+      // Broadcast flip completed
+      broadcastStateChange('flip_region', { direction, cellsFlipped: cellsInRegion.length });
       return {
         content: [{ 
           type: 'text', 
@@ -325,6 +341,8 @@ export function registerAnimationTools(server: McpServer): void {
         }
       }
       
+      // Broadcast copy completed
+      broadcastStateChange('copy_region_to_frame', { targetFrame, cellsCopied });
       return {
         content: [{ 
           type: 'text', 
@@ -428,6 +446,8 @@ export function registerAnimationTools(server: McpServer): void {
         });
       }
       
+      // Broadcast interpolation completed
+      broadcastStateChange('interpolate_frames', { framesCreated: createdFrames.length });
       return {
         content: [{ 
           type: 'text', 
