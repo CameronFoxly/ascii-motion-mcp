@@ -31,6 +31,7 @@ import {
   registerGeneratorTools,
   registerAdditionalExportTools,
   registerImportTools,
+  registerPaletteTools,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
@@ -175,6 +176,7 @@ async function main(): Promise<void> {
   registerGeneratorTools(server);
   registerAdditionalExportTools(server);
   registerImportTools(server);
+  registerPaletteTools(server);
   
   // Register resources
   registerResources(server);

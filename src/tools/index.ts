@@ -16,3 +16,4 @@ export { registerEffectsTools } from './effects.js';
 export { registerGeneratorTools } from './generators.js';
 export { registerAdditionalExportTools } from './export-additions.js';
 export { registerImportTools } from './import.js';
+export { registerPaletteTools } from './palettes.js';

@@ -631,6 +631,9 @@ export class ProjectStateManager {
     return this.state.selection;
   }
   
+  setToolState(updates: Partial<ToolState>): void {
+    this.state.toolState = { ...this.state.toolState, ...updates };
+  }
   clearSelection(): void {
     this.state.selection = null;
   }
