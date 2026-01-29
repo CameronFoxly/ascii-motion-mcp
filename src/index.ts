@@ -24,6 +24,11 @@ import {
   registerHistoryTools,
   registerAnimationTools,
   registerSelectionTools,
+  registerExportTools,
+  registerEffectsTools,
+  registerGeneratorTools,
+  registerAdditionalExportTools,
+  registerImportTools,
 } from './tools/index.js';
 
 // =============================================================================
@@ -142,6 +147,20 @@ AVAILABLE TOOLS:
   History:
     - undo, redo, get_history_status
 
+  Export:
+    - export_text, export_json, export_session, export_html
+    - export_react, export_ansi, export_ink, export_bubbletea
+    - export_opentui, export_image, export_video
+
+  Import:
+    - import_image, import_video, import_ascii_text
+
+  Effects:
+    - apply_effect, get_color_stats, batch_recolor, batch_replace_char
+
+  Generators:
+    - run_generator, preview_generator
+
 For detailed documentation, visit:
   https://github.com/CameronFoxly/ascii-motion-mcp
 `);
@@ -185,6 +204,11 @@ async function main(): Promise<void> {
   registerHistoryTools(server);
   registerAnimationTools(server);
   registerSelectionTools(server);
+  registerExportTools(server);
+  registerEffectsTools(server);
+  registerGeneratorTools(server);
+  registerAdditionalExportTools(server);
+  registerImportTools(server);
   
   // Initialize project manager
   getProjectManager();
