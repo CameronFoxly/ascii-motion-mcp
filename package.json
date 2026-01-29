@@ -1,0 +1,60 @@
+{
+  "name": "ascii-motion-mcp",
+  "version": "0.1.0-alpha.1",
+  "description": "MCP (Model Context Protocol) server for Ascii-Motion - enabling LLM-powered tools to create, animate, import, and export ASCII art",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ascii-motion-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build",
+    "inspector": "npx @modelcontextprotocol/inspector ./dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ascii-art",
+    "animation",
+    "llm",
+    "ai"
+  ],
+  "author": "CameronFoxly",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CameronFoxly/ascii-motion-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CameronFoxly/ascii-motion-mcp/issues"
+  },
+  "homepage": "https://github.com/CameronFoxly/ascii-motion-mcp#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0"
+  }
+}
