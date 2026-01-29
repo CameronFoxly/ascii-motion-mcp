@@ -10,6 +10,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
 import { parseCellKey, type Cell } from '../types.js';
 
+// Region schema with optional fields to handle partial inputs from MCP Inspector
+const RegionSchema = z.object({
+  x: z.number().int().optional().default(0),
+  y: z.number().int().optional().default(0),
+  width: z.number().int().min(1).optional(),
+  height: z.number().int().min(1).optional(),
+}).optional();
+
 export function registerPreviewTools(server: McpServer): void {
   // ==========================================================================
   // get_canvas_summary - Very compact overview (~30 tokens)
@@ -95,12 +103,7 @@ export function registerPreviewTools(server: McpServer): void {
     'Get non-empty cells in a region. Use for inspecting specific areas.',
     {
       frameIndex: z.number().int().optional().describe('Frame index (defaults to current)'),
-      region: z.object({
-        x: z.number().int(),
-        y: z.number().int(),
-        width: z.number().int().min(1),
-        height: z.number().int().min(1),
-      }).optional().describe('Region to preview (defaults to entire canvas)'),
+      region: RegionSchema.describe('Region to preview (defaults to entire canvas)'),
       maxCells: z.number().int().min(1).max(1000).default(100).describe('Maximum cells to return'),
     },
     async ({ frameIndex, region, maxCells }) => {
@@ -161,12 +164,7 @@ export function registerPreviewTools(server: McpServer): void {
     'Get the canvas as raw ASCII text (characters only, no color info). Good for verifying visual appearance.',
     {
       frameIndex: z.number().int().optional().describe('Frame index (defaults to current)'),
-      region: z.object({
-        x: z.number().int(),
-        y: z.number().int(),
-        width: z.number().int().min(1),
-        height: z.number().int().min(1),
-      }).optional().describe('Region to render (defaults to bounding box of content)'),
+      region: RegionSchema.describe('Region to render (defaults to bounding box of content)'),
       trimEmpty: z.boolean().default(true).describe('Trim empty rows/columns around content'),
       overlayPreviousFrame: z.boolean().default(false).describe('Show previous frame content as dim (for motion context)'),
     },
@@ -185,13 +183,36 @@ export function registerPreviewTools(server: McpServer): void {
       const frame = state.frames[frameIdx];
       const cells = Object.entries(frame.data);
       
+      // Handle empty canvas
       if (cells.length === 0) {
+        // If region is specified, render that region as empty
+        if (region?.width && region?.height) {
+          const emptyLines = Array(region.height).fill(' '.repeat(region.width));
+          return {
+            content: [{ 
+              type: 'text', 
+              text: JSON.stringify({
+                isEmpty: true,
+                bounds: { x: region.x ?? 0, y: region.y ?? 0, width: region.width, height: region.height },
+                ascii: emptyLines.join('\n'),
+              }) 
+            }],
+          };
+        }
+        // No region and no content - return empty indicator
         return {
-          content: [{ type: 'text', text: JSON.stringify({ isEmpty: true, ascii: '' }) }],
+          content: [{ 
+            type: 'text', 
+            text: JSON.stringify({ 
+              isEmpty: true, 
+              ascii: '',
+              hint: 'Canvas is empty. Draw some characters first with set_cell or paste_ascii_block.',
+            }) 
+          }],
         };
       }
       
-      // Calculate bounds
+      // Calculate bounds from existing content
       let minX = state.width, maxX = 0, minY = state.height, maxY = 0;
       
       for (const [key] of cells) {
