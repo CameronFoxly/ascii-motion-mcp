@@ -102,9 +102,9 @@ export class WebSocketServerTransport {
           return;
         }
         
-        // Validate origin (localhost only)
+        // Validate origin (localhost and ascii-motion.app)
         const origin = req.headers.origin;
-        if (origin && !origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
+        if (origin && !origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|ascii-motion\.app)(:\d+)?$/)) {
           console.error('[ws-transport] Invalid origin, closing connection:', origin);
           ws.close(1008, 'Invalid origin');
           return;
