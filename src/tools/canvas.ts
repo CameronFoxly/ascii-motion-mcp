@@ -251,7 +251,7 @@ export function registerCanvasTools(server: McpServer): void {
       pm.setCells(toSet);
       
       // Broadcast the paste operation to sync with browser
-      broadcastStateChange('paste_ascii_block', { cells: toSet });
+      broadcastStateChange('set_cells_batch', { cells: toSet });
       
       return {
         content: [{ 
