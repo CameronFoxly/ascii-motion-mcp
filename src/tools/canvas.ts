@@ -147,9 +147,16 @@ export function registerCanvasTools(server: McpServer): void {
         char: z.string().length(1).optional(),
         color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
         bgColor: z.string().optional(),
-      })).describe('Array of cells to set. Each cell can specify any combination of char, color, bgColor.'),
+      })).describe('Array of cells to set (max 10,000). Each cell can specify any combination of char, color, bgColor.'),
     },
     async ({ cells }) => {
+      // Security: limit batch size to prevent DoS
+      const MAX_BATCH_SIZE = 10000;
+      if (cells.length > MAX_BATCH_SIZE) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: `Batch size ${cells.length} exceeds maximum of ${MAX_BATCH_SIZE}` }) }],
+        };
+      }
       const pm = getProjectManager();
       const state = pm.getState();
       
