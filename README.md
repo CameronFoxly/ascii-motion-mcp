@@ -7,7 +7,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## What is this?
 
-ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, and Cursor to:
+The ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, and Cursor to operate [ascii-motion.app](https://ascii-motion.app). You can ask the LLM to:
 
 - 🎨 **Draw ASCII art** - Create pixel art and text graphics with characters
 - 🎬 **Animate** - Build frame-by-frame animations with onion skinning
@@ -15,7 +15,7 @@ ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, an
 - 📤 **Export** - Save as PNG, GIF, MP4, HTML, React, or CLI components
 - 🌈 **Apply effects** - Add digital rain, noise, color shifts, and more
 
-All through natural language prompts!
+All through natural language prompt in a live session of [ascii-motion.app](https://ascii-motion.app)!
 
 ## Quick Start
 
@@ -151,7 +151,7 @@ Add to your Windsurf MCP configuration:
 After configuring your AI client, you must connect the ASCII Motion browser app to see visual output:
 
 1. **Get the auth token** - Ask your AI: "What is the MCP auth token?"
-2. **Open ASCII Motion** - Go to [ascii.motion.dev](https://ascii.motion.dev)
+2. **Open ASCII Motion** - Go to [ascii-motion.app](https://ascii-motion.app)
 3. **Open MCP Connection** - Click the hamburger menu (☰) → **MCP Connection**
 4. **Paste the token** - Enter the auth token and click **Connect**
 
@@ -265,7 +265,7 @@ Restart your AI client after configuration changes. Check that the config file i
 - Verify the auth token is correct
 
 ### No visual output
-Make sure you're using the `--live` flag AND have connected the browser via MCP Connection.
+Make sure you're using the `--live` flag AND have connected the Ascii Motion app, via MCP Connection in the hamburger menu in the upper left. You'll know the connection is live if a green indicator dot is present on the hamburger menu.
 
 ## Links
 
