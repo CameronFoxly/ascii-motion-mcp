@@ -7,7 +7,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## What is this?
 
-The ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, and Cursor to operate [ascii-motion.app](https://ascii-motion.app). You can ask the LLM to:
+ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, and Cursor to:
 
 - 🎨 **Draw ASCII art** - Create pixel art and text graphics with characters
 - 🎬 **Animate** - Build frame-by-frame animations with onion skinning
@@ -15,7 +15,7 @@ The ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot
 - 📤 **Export** - Save as PNG, GIF, MP4, HTML, React, or CLI components
 - 🌈 **Apply effects** - Add digital rain, noise, color shifts, and more
 
-All through natural language prompt in a live session of [ascii-motion.app](https://ascii-motion.app)!
+All through natural language prompts!
 
 ## Quick Start
 
@@ -265,12 +265,12 @@ Restart your AI client after configuration changes. Check that the config file i
 - Verify the auth token is correct
 
 ### No visual output
-Make sure you're using the `--live` flag AND have connected the Ascii Motion app, via MCP Connection in the hamburger menu in the upper left. You'll know the connection is live if a green indicator dot is present on the hamburger menu.
+Make sure you're using the `--live` flag AND have connected the browser via MCP Connection.
 
 ## Links
 
-- [ASCII Motion Web App](https://ascii.motion.dev)
-- [Documentation](https://docs.ascii.motion.dev/mcp)
+- [ASCII Motion Web App](https://ascii-motion.app)
+- [Documentation](https://ascii-motion.app/docs/mcp)
 - [GitHub Issues](https://github.com/CameronFoxly/ascii-motion-mcp/issues)
 - [Discord Community](https://discord.gg/PVbpGgKQMy)
 
