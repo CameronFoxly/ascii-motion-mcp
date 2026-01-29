@@ -26,16 +26,8 @@ All through natural language prompts!
 
 ### Installation
 
-Install from source (npm package coming soon):
-
 ```bash
-# Clone the repository
-git clone https://github.com/cameronfoxly/ascii-motion-mcp.git
-cd ascii-motion-mcp
-
-# Install dependencies and link globally
-npm install
-npm link
+npm install -g ascii-motion-mcp
 ```
 
 Verify installation:
@@ -258,10 +250,10 @@ The server exposes these resources for state introspection:
 ## Troubleshooting
 
 ### "Command not found"
-Make sure the package is linked correctly. Try:
+Make sure npm global bin is in your PATH:
 ```bash
-cd ascii-motion-mcp
-npm link
+npm bin -g
+# Add the output to your PATH if needed
 ```
 
 ### Tools not appearing
