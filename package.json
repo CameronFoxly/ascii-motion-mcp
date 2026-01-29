@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "ascii-motion-mcp": "./dist/index.js"
+    "ascii-motion-mcp": "dist/index.js"
   },
   "files": [
     "dist",

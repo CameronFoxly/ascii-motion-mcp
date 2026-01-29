@@ -26,26 +26,17 @@ All through natural language prompts!
 
 ### Installation
 
-Install from source (npm package coming soon):
-
 ```bash
-# Clone the repository
-git clone https://github.com/cameronfoxly/ascii-motion-mcp.git
-cd ascii-motion-mcp
-
-# Install dependencies and link globally
-npm install
-npm link
+npm install -g ascii-motion-mcp
 ```
 
-Verify installation:
+Or run directly with npx:
+
 ```bash
-ascii-motion-mcp --help
+npx ascii-motion-mcp
 ```
 
 ## Client Setup
-
-> **Important:** The `--live` flag is required for all setups. Without it, the MCP tools have no visual output. After configuring your client, you must also connect the browser to see your AI's work.
 
 ### Claude Desktop
 
@@ -58,8 +49,8 @@ Add to your Claude Desktop config file:
 {
   "mcpServers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "/path/to/your/projects"]
+      "command": "npx",
+      "args": ["ascii-motion-mcp", "--project-dir", "/path/to/your/projects"]
     }
   }
 }
@@ -76,8 +67,8 @@ Restart Claude Desktop after saving.
 {
   "github.copilot.chat.mcpServers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "${workspaceFolder}"]
+      "command": "npx",
+      "args": ["ascii-motion-mcp", "--project-dir", "${workspaceFolder}"]
     }
   }
 }
@@ -107,9 +98,9 @@ gh auth login
 ```yaml
 mcpServers:
   ascii-motion:
-    command: ascii-motion-mcp
+    command: npx
     args:
-      - --live
+      - ascii-motion-mcp
       - --project-dir
       - ~/ascii-art-projects
 ```
@@ -130,8 +121,8 @@ gh copilot chat "Create an 8-frame animation of a bouncing ball"
 {
   "mcp.servers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "/path/to/projects"]
+      "command": "npx",
+      "args": ["ascii-motion-mcp", "--project-dir", "/path/to/projects"]
     }
   }
 }
@@ -147,23 +138,27 @@ Add to your Windsurf MCP configuration:
 {
   "mcpServers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp", 
-      "args": ["--live", "--project-dir", "/path/to/projects"]
+      "command": "npx", 
+      "args": ["ascii-motion-mcp", "--project-dir", "/path/to/projects"]
     }
   }
 }
 ```
 
-## Connect the Browser
+## Live Browser Sync Mode
 
-After configuring your AI client, you must connect the ASCII Motion browser app to see visual output:
+For real-time preview in the ASCII Motion web editor:
 
-1. **Get the auth token** - Ask your AI: "What is the MCP auth token?"
-2. **Open ASCII Motion** - Go to [ascii.motion.dev](https://ascii.motion.dev)
-3. **Open MCP Connection** - Click the hamburger menu (☰) → **MCP Connection**
-4. **Paste the token** - Enter the auth token and click **Connect**
+1. Start the MCP server with `--live` flag:
 
-You should see a green "Connected" status. Now your AI's edits appear in real-time!
+```bash
+npx ascii-motion-mcp --live --project-dir ./my-projects
+```
+
+2. The server will print an auth token - copy it
+3. Open [ASCII Motion](https://ascii.motion.dev) in your browser
+4. Click the MCP connection icon and paste the token
+5. Now your AI edits appear instantly in the browser!
 
 ## CLI Options
 
@@ -172,7 +167,7 @@ ascii-motion-mcp [options]
 
 Options:
   -d, --project-dir PATH  Project directory for file operations (default: cwd)
-  -l, --live              Enable live browser sync via WebSocket (REQUIRED)
+  -l, --live              Enable live browser sync via WebSocket
   -p, --port PORT         WebSocket port for live mode (default: 9876)
   -h, --help              Show help
   -v, --version           Show version
@@ -258,10 +253,9 @@ The server exposes these resources for state introspection:
 ## Troubleshooting
 
 ### "Command not found"
-Make sure the package is linked correctly. Try:
+Make sure Node.js is in your PATH and try using the full path:
 ```bash
-cd ascii-motion-mcp
-npm link
+/usr/local/bin/npx ascii-motion-mcp
 ```
 
 ### Tools not appearing
@@ -271,9 +265,6 @@ Restart your AI client after configuration changes. Check that the config file i
 - Ensure port 9876 is available
 - Check that you're connecting from localhost
 - Verify the auth token is correct
-
-### No visual output
-Make sure you're using the `--live` flag AND have connected the browser via MCP Connection.
 
 ## Links
 
