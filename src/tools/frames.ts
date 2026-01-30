@@ -182,7 +182,17 @@ export function registerFrameTools(server: McpServer): void {
       
       const updatedState = pm.getState();
       // Broadcast frame duplicated
-      broadcastStateChange('duplicate_frame', { newFrame, totalFrames: updatedState.frames.length });
+      const newFrameIndex = updatedState.frames.findIndex(f => f.id === newFrame.id);
+      broadcastStateChange('duplicate_frame', { 
+        newFrame: {
+          index: newFrameIndex,
+          id: newFrame.id,
+          name: newFrame.name,
+          duration: newFrame.duration,
+          data: newFrame.data,
+        },
+        totalFrames: updatedState.frames.length 
+      });
       
       return {
         content: [{ 
