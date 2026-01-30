@@ -798,6 +798,63 @@ export class ProjectStateManager {
     };
   }
   
+
+  // ==========================================================================
+  // Browser State Sync
+  // ==========================================================================
+  
+  /**
+   * Load state from a browser state snapshot.
+   * Called when browser connects and sends its current state.
+   */
+  loadFromBrowserSnapshot(snapshot: unknown): void {
+    const data = snapshot as {
+      canvas?: { width: number; height: number; backgroundColor?: string };
+      animation?: {
+        frames: Array<{
+          id: string;
+          name: string;
+          duration: number;
+          data: Record<string, { char: string; color: string; bgColor: string }>;
+        }>;
+        currentFrameIndex: number;
+      };
+      project?: { name: string };
+    };
+    
+    if (!data) return;
+    
+    console.error('[state] Loading state from browser snapshot');
+    
+    // Update canvas dimensions
+    if (data.canvas) {
+      this.state.width = data.canvas.width ?? this.state.width;
+      this.state.height = data.canvas.height ?? this.state.height;
+      this.state.backgroundColor = data.canvas.backgroundColor ?? this.state.backgroundColor;
+    }
+    
+    // Update project name
+    if (data.project?.name) {
+      this.state.name = data.project.name;
+    }
+    
+    // Update frames
+    if (data.animation?.frames && data.animation.frames.length > 0) {
+      this.state.frames = data.animation.frames.map((frame, index) => ({
+        id: frame.id || generateFrameId(),
+        name: frame.name || `Frame ${index + 1}`,
+        duration: frame.duration || 100,
+        data: frame.data || {},
+      }));
+      this.state.currentFrameIndex = Math.min(
+        data.animation.currentFrameIndex ?? 0,
+        this.state.frames.length - 1
+      );
+      
+      console.error(`[state] Loaded ${this.state.frames.length} frames from browser`);
+    }
+  }
+
   setFilePath(path: string): void {
     this.state.filePath = path;
   }

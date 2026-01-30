@@ -201,6 +201,12 @@ async function main(): Promise<void> {
     // Start WebSocket server
     await hybridTransport.startWebSocket();
     
+    // Handle state snapshots from browser (syncs browser state to MCP)
+    hybridTransport.wsServer.onStateSnapshot = (snapshot: unknown) => {
+      const pm = getProjectManager();
+      pm.loadFromBrowserSnapshot(snapshot);
+    };
+    
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
     console.error(`[ascii-motion-mcp] Auth Token: ${hybridTransport.authToken}`);

@@ -26,6 +26,7 @@ export class WebSocketServerTransport {
   private clients: Set<WebSocket> = new Set();
   private _sessionId: string;
   private _authToken: string;
+  onStateSnapshot?: (snapshot: unknown) => void;
   private options: WebSocketTransportOptions;
   
   onclose?: () => void;
@@ -115,7 +116,14 @@ export class WebSocketServerTransport {
 
         ws.on('message', (data) => {
           try {
-            const message = JSON.parse(data.toString()) as JSONRPCMessage;
+            const rawMessage = JSON.parse(data.toString());
+            // Handle state_snapshot from browser
+            if (rawMessage.type === 'state_snapshot') {
+              console.error('[ws-transport] Received state snapshot from browser');
+              this.onStateSnapshot?.(rawMessage);
+              return;
+            }
+            const message = rawMessage as JSONRPCMessage;
             this.onmessage?.(message);
           } catch (error) {
             console.error('[ws-transport] Failed to parse message:', error);
