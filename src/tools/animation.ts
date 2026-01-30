@@ -341,8 +341,11 @@ export function registerAnimationTools(server: McpServer): void {
         }
       }
       
-      // Broadcast copy completed
-      broadcastStateChange('copy_region_to_frame', { targetFrame, cellsCopied });
+      // Broadcast with full frame data so browser can sync
+      broadcastStateChange('set_frame_data', { 
+        frameIndex: targetFrame, 
+        data: tgtFrame.data 
+      });
       return {
         content: [{ 
           type: 'text', 

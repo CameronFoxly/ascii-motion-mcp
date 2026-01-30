@@ -79,8 +79,15 @@ export function registerFrameTools(server: McpServer): void {
       }
       
       const updatedState = pm.getState();
-      // Broadcast frame added
-      broadcastStateChange('add_frame', { frame: newFrame, totalFrames: updatedState.frames.length });
+      const frameIndex = updatedState.frames.findIndex(f => f.id === newFrame.id);
+      // Broadcast frame added with full data
+      broadcastStateChange('add_frame', { 
+        frame: { 
+          ...newFrame, 
+          index: frameIndex 
+        }, 
+        totalFrames: updatedState.frames.length 
+      });
       
       return {
         content: [{ 

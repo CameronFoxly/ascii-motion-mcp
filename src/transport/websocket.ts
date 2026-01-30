@@ -202,6 +202,39 @@ export class WebSocketServerTransport {
     }
   }
 
+
+  /**
+   * Request state from browser.
+   * Sends a state_request message and waits for a state_snapshot response.
+   */
+  async requestStateFromBrowser(timeoutMs = 5000): Promise<boolean> {
+    if (this.clients.size === 0) {
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve(false);
+      }, timeoutMs);
+
+      const originalCallback = this.onStateSnapshot;
+      
+      this.onStateSnapshot = (snapshot) => {
+        clearTimeout(timeout);
+        originalCallback?.(snapshot);
+        this.onStateSnapshot = originalCallback;
+        resolve(true);
+      };
+
+      const message = JSON.stringify({ type: "state_request" });
+      for (const client of this.clients) {
+        if (client.readyState === 1) {
+          client.send(message);
+        }
+      }
+    });
+  }
+
   /**
    * Close the WebSocket server.
    */
@@ -280,5 +313,9 @@ export class HybridTransport {
   
   broadcastStateChange(type: string, data: unknown): void {
     this.wsTransport.broadcastStateChange(type, data);
+  }
+
+  async requestStateFromBrowser(timeoutMs = 5000): Promise<boolean> {
+    return this.wsTransport.requestStateFromBrowser(timeoutMs);
   }
 }

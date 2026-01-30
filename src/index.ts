@@ -32,6 +32,8 @@ import {
   registerAdditionalExportTools,
   registerImportTools,
   registerPaletteTools,
+  registerSyncTools,
+  setRequestBrowserStateCallback,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
   registerAdditionalExportTools(server);
   registerImportTools(server);
   registerPaletteTools(server);
+  registerSyncTools(server);
   
   // Register resources
   registerResources(server);
@@ -207,6 +210,13 @@ async function main(): Promise<void> {
       pm.loadFromBrowserSnapshot(snapshot);
     };
     
+    
+    // Wire up the refresh_state_from_browser tool
+    setRequestBrowserStateCallback(async (): Promise<boolean> => {
+      if (!hybridTransport) return false;
+      return hybridTransport.requestStateFromBrowser();
+    });
+
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
     console.error(`[ascii-motion-mcp] Auth Token: ${hybridTransport.authToken}`);

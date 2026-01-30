@@ -7,6 +7,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
+import { registerGuideResources } from './guide.js';
 
 export function registerResources(server: McpServer): void {
   // ==========================================================================
@@ -234,4 +235,8 @@ export function registerResources(server: McpServer): void {
       };
     }
   );
+
+
+  // Register LLM guide resources
+  registerGuideResources(server);
 }
