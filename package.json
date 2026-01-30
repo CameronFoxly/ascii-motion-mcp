@@ -1,6 +1,6 @@
 {
   "name": "ascii-motion-mcp",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP (Model Context Protocol) server for Ascii-Motion - enabling LLM-powered tools to create, animate, import, and export ASCII art",
   "type": "module",
   "main": "./dist/index.js",
