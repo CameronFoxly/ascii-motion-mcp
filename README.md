@@ -62,21 +62,58 @@ Restart Claude Desktop after saving.
 ### VS Code with GitHub Copilot
 
 1. Install the [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot) extension
-2. Open VS Code Settings (JSON) and add:
+
+2. Create `.vscode/mcp.json` in your workspace:
 
 ```json
 {
-  "github.copilot.chat.mcpServers": {
+  "servers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "${workspaceFolder}"]
+      "command": "npx",
+      "args": [
+        "ascii-motion-mcp",
+        "--live",
+        "--project-dir",
+        "${workspaceFolder}"
+      ],
+      "type": "stdio"
     }
   }
 }
 ```
 
-3. Restart VS Code
-4. Open Copilot Chat and start creating!
+Or if you've installed globally (`npm install -g ascii-motion-mcp`):
+
+```json
+{
+  "servers": {
+    "ascii-motion": {
+      "command": "ascii-motion-mcp",
+      "args": [
+        "--live",
+        "--project-dir",
+        "${workspaceFolder}"
+      ],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+3. Restart VS Code completely (not just reload window)
+
+4. Open Copilot Chat - the MCP tools should now be available!
+
+> **Note:** VS Code spawns the MCP server automatically when Copilot needs it. You don't run the server manually.
+
+### Connect the Browser (Optional)
+
+To see edits in real-time:
+
+1. Ask Copilot: "What is the MCP auth token?"
+2. Open [ascii-motion.app](https://ascii-motion.app)
+3. Click ☰ → **MCP Connection**
+4. Paste the token and click **Connect**
 
 ### GitHub Copilot CLI
 
