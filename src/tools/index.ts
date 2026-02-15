@@ -18,3 +18,4 @@ export { registerAdditionalExportTools } from './export-additions.js';
 export { registerImportTools } from './import.js';
 export { registerPaletteTools } from './palettes.js';
 export { registerSyncTools, setRequestBrowserStateCallback } from './sync.js';
+export { registerLayerTools } from './layers.js';

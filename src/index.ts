@@ -34,6 +34,7 @@ import {
   registerPaletteTools,
   registerSyncTools,
   setRequestBrowserStateCallback,
+  registerLayerTools,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
@@ -125,10 +126,10 @@ LIVE MODE:
 
   Connect URL: ws://127.0.0.1:PORT/?token=AUTH_TOKEN
 
-AVAILABLE TOOLS (60 total):
+AVAILABLE TOOLS (77+ total):
   Canvas (8), Frames (7), Project (6), Preview (5), Animation (5),
   Selection (6), History (3), Export (11), Import (3), Effects (4),
-  Generators (2)
+  Generators (2), Layers (17)
 
 For detailed documentation, visit:
   https://github.com/CameronFoxly/ascii-motion-mcp
@@ -136,7 +137,7 @@ For detailed documentation, visit:
 }
 
 function showVersion(): void {
-  console.log('ascii-motion-mcp v0.2.0-alpha.1');
+  console.log('ascii-motion-mcp v2.0.0');
 }
 
 // =============================================================================
@@ -162,7 +163,7 @@ async function main(): Promise<void> {
   // Create the MCP server
   const server = new McpServer({
     name: 'ascii-motion-mcp',
-    version: '0.2.0-alpha.1',
+    version: '2.0.0',
   });
   
   // Register all tools
@@ -180,6 +181,7 @@ async function main(): Promise<void> {
   registerImportTools(server);
   registerPaletteTools(server);
   registerSyncTools(server);
+  registerLayerTools(server);
   
   // Register resources
   registerResources(server);

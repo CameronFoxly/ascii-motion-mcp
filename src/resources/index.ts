@@ -34,11 +34,17 @@ export function registerResources(server: McpServer): void {
             width: state.width,
             height: state.height,
             backgroundColor: state.backgroundColor,
+            isLayerMode: pm.isLayerMode(),
             frameCount: state.frames.length,
             currentFrameIndex: state.currentFrameIndex,
             isDirty: state.isDirty,
             toolState: state.toolState,
             hasSelection: state.selection !== null,
+            // v2 layer info
+            layerCount: state.layers.length,
+            activeLayerId: state.activeLayerId,
+            timeline: pm.isLayerMode() ? state.timelineConfig : undefined,
+            groupCount: state.layerGroups.length,
           }, null, 2),
         }],
       };
@@ -231,6 +237,79 @@ export function registerResources(server: McpServer): void {
           uri: 'project://ascii',
           mimeType: 'text/plain',
           text: lines.join('\n') || '(empty canvas)',
+        }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // project://layers - Layer structure and metadata (v2)
+  // ==========================================================================
+  server.resource(
+    'project-layers',
+    'project://layers',
+    {
+      description: 'Layer structure with content frames, property tracks, and groups. Only available in layer mode (v2).',
+      mimeType: 'application/json',
+    },
+    async () => {
+      const pm = getProjectManager();
+      const state = pm.getState();
+
+      if (!pm.isLayerMode()) {
+        return {
+          contents: [{
+            uri: 'project://layers',
+            mimeType: 'application/json',
+            text: JSON.stringify({
+              isLayerMode: false,
+              message: 'Project is in legacy frame mode. Use add_layer to switch to layer mode.',
+            }, null, 2),
+          }],
+        };
+      }
+
+      return {
+        contents: [{
+          uri: 'project://layers',
+          mimeType: 'application/json',
+          text: JSON.stringify({
+            isLayerMode: true,
+            activeLayerId: state.activeLayerId,
+            currentFrame: state.currentFrameIndex,
+            timeline: state.timelineConfig,
+            layers: state.layers.map(l => ({
+              id: l.id,
+              name: l.name,
+              visible: l.visible,
+              solo: l.solo,
+              locked: l.locked,
+              opacity: l.opacity,
+              isActive: l.id === state.activeLayerId,
+              parentGroupId: l.parentGroupId,
+              contentFrames: l.contentFrames.map(cf => ({
+                id: cf.id,
+                name: cf.name,
+                startFrame: cf.startFrame,
+                durationFrames: cf.durationFrames,
+                cellCount: Object.keys(cf.data).length,
+                hidden: cf.hidden,
+              })),
+              propertyTracks: l.propertyTracks.map(pt => ({
+                id: pt.id,
+                propertyPath: pt.propertyPath,
+                keyframeCount: pt.keyframes.length,
+                loopKeyframes: pt.loopKeyframes,
+              })),
+            })),
+            groups: state.layerGroups.map(g => ({
+              id: g.id,
+              name: g.name,
+              childLayerIds: g.childLayerIds,
+              visible: g.visible,
+              collapsed: g.collapsed,
+            })),
+          }, null, 2),
         }],
       };
     }

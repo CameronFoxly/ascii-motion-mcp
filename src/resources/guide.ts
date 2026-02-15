@@ -77,7 +77,7 @@ Use consistent colors to convey meaning:
 7. describe_animation() to verify
 `;
 
-const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories
+const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.0.0)
 
 ## Canvas Editing
 - set_cell - Set character and colors at position
@@ -89,9 +89,36 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories
 - fill_region - Fill area with character
 - clear_canvas - Clear all cells
 
-## Animation and Frames
+## Layers (v2 — layer-based timeline)
+- get_layers - List all layers with metadata
+- add_layer - Add a new layer (switches to layer mode)
+- remove_layer - Remove a layer
+- duplicate_layer - Duplicate a layer with content
+- set_active_layer - Set which layer receives drawing
+- rename_layer - Rename a layer
+- reorder_layers - Change layer z-order
+- set_layer_visibility - Toggle visible/solo/lock/opacity
+- get_layer_properties - Get transform values and keyframe status
+
+## Content Frames (v2)
+- add_content_frame - Add canvas data segment to a layer
+- remove_content_frame - Remove a content frame
+
+## Keyframes (v2)
+- add_keyframe - Keyframe a layer property (position, scale, rotation, anchor)
+- remove_keyframe - Remove a keyframe
+
+## Layer Groups (v2)
+- create_group - Group layers together
+- ungroup_layers - Dissolve a group
+
+## Timeline (v2)
+- set_frame_rate - Set animation FPS (1-120)
+- set_timeline_duration - Set total timeline length
+
+## Animation and Frames (legacy)
 - add_frame - Add new frame
-- copy_frame_and_modify - Duplicate and modify in one call (inserts at index 1!)
+- copy_frame_and_modify - Duplicate and modify in one call
 - delete_frame - Remove a frame
 - list_frames - List all frames with metadata
 - set_frame_duration - Set timing
@@ -122,6 +149,16 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories
 ## Canvas Management
 - resize_canvas - Change canvas dimensions
 - get_canvas_summary - Get canvas overview
+
+## Layer vs Frame Workflow
+
+**Layer mode (v2):** Use add_layer, add_content_frame, add_keyframe for professional
+multi-layer animations with transform keyframes (position, scale, rotation).
+
+**Frame mode (legacy):** Use add_frame, copy_frame_and_modify for simple frame-by-frame
+animations. Still fully supported.
+
+Projects start in frame mode. Calling add_layer switches to layer mode.
 `;
 
 export function registerGuideResources(server: McpServer): void {
