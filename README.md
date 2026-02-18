@@ -1,6 +1,6 @@
 # ASCII Motion MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables AI assistants to create, animate, and export ASCII art through natural language.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables AI assistants to create, animate, and export ASCII art from the [ASCII Motion app](https://ascii-motion.app), using natural language.
 
 ![npm version](https://img.shields.io/npm/v/ascii-motion-mcp)
 ![license](https://img.shields.io/npm/l/ascii-motion-mcp)
