@@ -1,6 +1,6 @@
 /**
  * LLM Best Practices Guide Resources
- * 
+ *
  * Provides learned patterns and best practices for LLMs using ASCII Motion MCP tools.
  * LLMs can read these resources before starting complex animation tasks.
  */
@@ -17,7 +17,7 @@ Before placing ANY animated elements (circles, indicators, data flow particles),
 3. Place elements EXACTLY on connection line characters, not near them
 
 ### Why This Matters
-ASCII diagrams use box-drawing characters at specific x,y coordinates. 
+ASCII diagrams use box-drawing characters at specific x,y coordinates.
 Animated elements like data flow particles must be placed EXACTLY on these coordinates.
 
 ### Coordinate Discovery Workflow
@@ -35,7 +35,7 @@ If you create frames for steps 1 through 5:
 - Index 1: Step 5 (last created)
 - Index 2: Step 4
 - Index 3: Step 3
-- Index 4: Step 2  
+- Index 4: Step 2
 - Index 5: Step 1 (first created)
 
 Solutions:
@@ -157,6 +157,10 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.1.0)
 ## Canvas Management
 - resize_canvas - Change canvas dimensions
 - get_canvas_summary - Get canvas overview
+
+## Browser Connection
+- get_connection_status - Check browser connection status
+- get_auth_token - Get the auth token needed for the browser connection
 
 ## Layer vs Frame Workflow
 

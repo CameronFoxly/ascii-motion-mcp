@@ -1,6 +1,6 @@
 /**
  * Tools Index
- * 
+ *
  * Exports all tool registration functions.
  */
 
@@ -17,5 +17,13 @@ export { registerGeneratorTools } from './generators.js';
 export { registerAdditionalExportTools } from './export-additions.js';
 export { registerImportTools } from './import.js';
 export { registerPaletteTools } from './palettes.js';
-export { registerSyncTools, setRequestBrowserStateCallback } from './sync.js';
+export {
+  registerSyncTools,
+  setRequestBrowserStateCallback as setSyncToolsBrowserStateCallback
+} from './sync.js';
 export { registerLayerTools } from './layers.js';
+export {
+  registerConnectionTools,
+  setRequestBrowserStateCallback as setConnectionToolsBrowserStateCallback,
+  setRequestRequestAuthTokenCallback,
+} from './connection.js';
