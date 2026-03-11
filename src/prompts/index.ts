@@ -255,4 +255,51 @@ Steps:
       };
     }
   );
+
+  // ==========================================================================
+  // Add Procedural Effects
+  // ==========================================================================
+  server.prompt(
+    'add-effects',
+    'Add procedural (non-destructive) effects to an animation for color adjustments, distortions, or character remapping',
+    {
+      effectType: z.string().optional().describe('Effect type: levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle'),
+      target: z.string().optional().describe('Where to apply: "global" for all layers, or a layer name'),
+      animated: z.string().optional().describe('Whether to keyframe the effect (yes/no, default: no)'),
+    },
+    async ({ effectType, target, animated }) => {
+      const effect = effectType || 'hue-saturation';
+      const isAnimated = animated === 'yes';
+
+      return {
+        messages: [{
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: `Add a ${effect} procedural effect to ${target === 'global' || !target ? 'the global effects (applies to all layers)' : `the layer named "${target}"`}.
+
+Steps:
+1. First call get_layers to find the target layer ID (or use null for global)
+2. Call add_effect_block with:
+   - ownerId: ${target === 'global' || !target ? 'null (for global)' : 'the layer ID'}
+   - effectType: "${effect}"
+   - Settings appropriate for the effect type
+3. ${isAnimated ? 'Add keyframes with add_effect_keyframe to animate the effect over time' : 'Adjust settings with update_effect_block if needed'}
+4. Use get_effect_blocks to verify the effect was added
+
+Available effect types and their key settings:
+- levels: midtonesInput (0-100, default 50), shadowsInput (0-255), highlightsInput (0-255), outputMin, outputMax
+- hue-saturation: hue (-180 to 180), saturation (-100 to 100), lightness (-100 to 100)
+- remap-colors: colorMappings ({"#old": "#new"})
+- remap-characters: characterMappings ({"@": "#"})
+- scatter: strength (0-400)
+- wave-warp: amplitude (-30 to 30), frequency (0.1-5), speed (-50 to 50), axis (horizontal/vertical)
+- wiggle: mode (horizontal-wave/vertical-wave/noise), waveFrequency (0-20), waveAmplitude (1-20)
+
+Note: Effects are non-destructive and evaluated in real-time. They can be enabled/disabled, reordered, and keyframed.`,
+          },
+        }],
+      };
+    }
+  );
 }

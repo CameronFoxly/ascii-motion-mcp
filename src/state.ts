@@ -24,6 +24,8 @@ import {
   type TimelineConfig,
   type PropertyPath,
   type EasingCurve,
+  type MCPEffectTrack,
+  type MCPEffectBlock,
   EMPTY_CELL,
   createCellKey,
   parseCellKey,
@@ -34,6 +36,9 @@ import {
   generatePropertyTrackId,
   generateKeyframeId,
   generateLayerGroupId,
+  generateEffectTrackId,
+  generateEffectBlockId,
+  generateEffectPropertyTrackId,
   detectSessionVersion,
   recordToMap,
   SessionDataSchema,
@@ -78,6 +83,7 @@ export interface ProjectState {
   // Layer timeline (v2)
   layers: MCPLayer[];
   layerGroups: MCPLayerGroup[];
+  globalEffects: MCPEffectTrack[];
   activeLayerId: string | null;
   timelineConfig: TimelineConfig;
   
@@ -129,6 +135,7 @@ function createDefaultLayer(name = 'Layer 1', canvasWidth = 80, canvasHeight = 2
       data: {},
     }],
     propertyTracks: [],
+    effectTracks: [],
     staticProperties: {
       'transform.anchorPoint.x': anchorX,
       'transform.anchorPoint.y': anchorY,
@@ -155,6 +162,7 @@ function createDefaultState(): ProjectState {
     
     layers: [],
     layerGroups: [],
+    globalEffects: [],
     activeLayerId: null,
     timelineConfig: {
       frameRate: 12,
@@ -1022,6 +1030,186 @@ export class ProjectStateManager {
 
   getLayerGroups(): MCPLayerGroup[] {
     return this.state.layerGroups;
+  }
+
+  // ==========================================================================
+  // Effect Track Operations
+  // ==========================================================================
+
+  /**
+   * Add an effect block to a layer, group, or global effects.
+   * @param ownerId - Layer or group ID, or null for global effects
+   * @param effectType - Effect type string
+   * @param startFrame - Start frame of the effect
+   * @param durationFrames - Duration in frames
+   * @param settings - Effect-specific settings
+   * @returns The created effect track, or null if owner not found
+   */
+  addEffectBlock(ownerId: string | null, effectType: string, startFrame: number, durationFrames: number, settings?: Record<string, unknown>): MCPEffectTrack | null {
+    const track: MCPEffectTrack = {
+      id: generateEffectTrackId(),
+      ownerId,
+      effectBlock: {
+        id: generateEffectBlockId(),
+        effectType,
+        startFrame,
+        durationFrames,
+        enabled: true,
+        settings: settings ?? {},
+        propertyTracks: [],
+      },
+    };
+
+    if (ownerId === null) {
+      this.state.globalEffects.push(track);
+    } else {
+      const layer = this.state.layers.find(l => l.id === ownerId);
+      if (layer) {
+        if (!layer.effectTracks) layer.effectTracks = [];
+        layer.effectTracks.push(track);
+      } else {
+        const group = this.state.layerGroups.find(g => g.id === ownerId);
+        if (group) {
+          if (!group.effectTracks) group.effectTracks = [];
+          group.effectTracks.push(track);
+        } else {
+          return null;
+        }
+      }
+    }
+
+    this.state.isDirty = true;
+    return track;
+  }
+
+  /**
+   * Remove an effect block by its ID.
+   */
+  removeEffectBlock(blockId: string): boolean {
+    // Search layers
+    for (const layer of this.state.layers) {
+      const idx = (layer.effectTracks ?? []).findIndex(t => t.effectBlock.id === blockId);
+      if (idx !== -1) {
+        layer.effectTracks!.splice(idx, 1);
+        this.state.isDirty = true;
+        return true;
+      }
+    }
+    // Search groups
+    for (const group of this.state.layerGroups) {
+      const idx = (group.effectTracks ?? []).findIndex(t => t.effectBlock.id === blockId);
+      if (idx !== -1) {
+        group.effectTracks!.splice(idx, 1);
+        this.state.isDirty = true;
+        return true;
+      }
+    }
+    // Search global
+    const gIdx = this.state.globalEffects.findIndex(t => t.effectBlock.id === blockId);
+    if (gIdx !== -1) {
+      this.state.globalEffects.splice(gIdx, 1);
+      this.state.isDirty = true;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Update effect block settings.
+   */
+  updateEffectBlock(blockId: string, updates: { startFrame?: number; durationFrames?: number; enabled?: boolean; settings?: Record<string, unknown> }): boolean {
+    const block = this.findEffectBlock(blockId);
+    if (!block) return false;
+    if (updates.startFrame !== undefined) block.startFrame = updates.startFrame;
+    if (updates.durationFrames !== undefined) block.durationFrames = updates.durationFrames;
+    if (updates.enabled !== undefined) block.enabled = updates.enabled;
+    if (updates.settings !== undefined) block.settings = { ...block.settings, ...updates.settings };
+    this.state.isDirty = true;
+    return true;
+  }
+
+  /**
+   * Find an effect block by its ID across all owners.
+   */
+  findEffectBlock(blockId: string): MCPEffectBlock | null {
+    for (const layer of this.state.layers) {
+      const track = (layer.effectTracks ?? []).find(t => t.effectBlock.id === blockId);
+      if (track) return track.effectBlock;
+    }
+    for (const group of this.state.layerGroups) {
+      const track = (group.effectTracks ?? []).find(t => t.effectBlock.id === blockId);
+      if (track) return track.effectBlock;
+    }
+    const globalTrack = this.state.globalEffects.find(t => t.effectBlock.id === blockId);
+    if (globalTrack) return globalTrack.effectBlock;
+    return null;
+  }
+
+  /**
+   * Get all effect tracks (layer + group + global).
+   */
+  getAllEffectTracks(): { ownerId: string | null; ownerType: 'layer' | 'group' | 'global'; track: MCPEffectTrack }[] {
+    const result: { ownerId: string | null; ownerType: 'layer' | 'group' | 'global'; track: MCPEffectTrack }[] = [];
+    for (const layer of this.state.layers) {
+      for (const track of (layer.effectTracks ?? [])) {
+        result.push({ ownerId: layer.id, ownerType: 'layer', track });
+      }
+    }
+    for (const group of this.state.layerGroups) {
+      for (const track of (group.effectTracks ?? [])) {
+        result.push({ ownerId: group.id, ownerType: 'group', track });
+      }
+    }
+    for (const track of this.state.globalEffects) {
+      result.push({ ownerId: null, ownerType: 'global', track });
+    }
+    return result;
+  }
+
+  /**
+   * Add an effect keyframe.
+   */
+  addEffectKeyframe(blockId: string, propertyPath: string, frame: number, value: unknown): string | null {
+    const block = this.findEffectBlock(blockId);
+    if (!block) return null;
+
+    let propTrack = block.propertyTracks.find(pt => pt.propertyPath === propertyPath);
+    if (!propTrack) {
+      propTrack = {
+        id: generateEffectPropertyTrackId(),
+        propertyPath,
+        keyframes: [],
+      };
+      block.propertyTracks.push(propTrack);
+    }
+
+    const kfId = generateKeyframeId();
+    propTrack.keyframes.push({
+      id: kfId,
+      frame,
+      value: value as number | boolean | string | Record<string, string>,
+      easing: { type: 'linear' },
+    });
+    propTrack.keyframes.sort((a, b) => a.frame - b.frame);
+    this.state.isDirty = true;
+    return kfId;
+  }
+
+  /**
+   * Remove an effect keyframe.
+   */
+  removeEffectKeyframe(blockId: string, keyframeId: string): boolean {
+    const block = this.findEffectBlock(blockId);
+    if (!block) return false;
+    for (const pt of block.propertyTracks) {
+      const idx = pt.keyframes.findIndex(kf => kf.id === keyframeId);
+      if (idx !== -1) {
+        pt.keyframes.splice(idx, 1);
+        this.state.isDirty = true;
+        return true;
+      }
+    }
+    return false;
   }
 
   // ==========================================================================

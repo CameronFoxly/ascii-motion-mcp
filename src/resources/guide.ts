@@ -77,7 +77,7 @@ Use consistent colors to convey meaning:
 7. describe_animation() to verify
 `;
 
-const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.0.0)
+const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.1.0)
 
 ## Canvas Editing
 - set_cell - Set character and colors at position
@@ -138,7 +138,15 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.0.0)
 - batch_recolor - Replace one color with another
 - batch_replace_char - Replace one character with another
 - get_color_stats - Get color usage statistics
-- apply_effect - Apply visual effects
+- apply_effect - Apply visual effects (destructive, modifies cells directly)
+
+## Procedural Effects (v2.1 — non-destructive, keyframeable)
+- get_effect_blocks - List all procedural effect blocks across layers/groups/global
+- add_effect_block - Add a non-destructive effect (levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle)
+- update_effect_block - Update effect settings, timing, or enabled state
+- remove_effect_block - Remove a procedural effect
+- add_effect_keyframe - Keyframe an effect property for animation
+- remove_effect_keyframe - Remove an effect keyframe
 
 ## Selection Tools
 - select_rectangle - Select rectangular area
@@ -159,6 +167,32 @@ multi-layer animations with transform keyframes (position, scale, rotation).
 animations. Still fully supported.
 
 Projects start in frame mode. Calling add_layer switches to layer mode.
+
+## Procedural Effects Workflow
+
+Procedural effects are non-destructive and live on the timeline as effect tracks.
+They are evaluated in real-time during playback and compositing.
+
+### Effect Types
+- **levels** - Brightness/contrast via shadows, midtones, highlights, output range
+- **hue-saturation** - Hue shift, saturation, lightness adjustments
+- **remap-colors** - Map specific colors to new colors
+- **remap-characters** - Map specific characters to new characters
+- **scatter** - Random cell displacement (strength 0-400)
+- **wave-warp** - Sine wave distortion (amplitude, frequency, speed, phase)
+- **wiggle** - Global displacement via wave or noise (horizontal-wave, vertical-wave, noise)
+
+### Adding Effects
+1. Use add_effect_block with an ownerId (layer ID, group ID, or null for global)
+2. Set effect type, start frame, duration, and initial settings
+3. Optionally add keyframes with add_effect_keyframe for animated properties
+
+### Key Concepts
+- Effects on layers apply in local space before transforms
+- Effects on groups apply to all child layers
+- Global effects (ownerId=null) apply after full compositing
+- wave-warp and wiggle are time-dependent — they animate automatically
+- Use get_effect_blocks to inspect current effects before modifying
 `;
 
 export function registerGuideResources(server: McpServer): void {

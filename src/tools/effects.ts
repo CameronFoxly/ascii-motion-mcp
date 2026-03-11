@@ -423,6 +423,217 @@ export function registerEffectsTools(server: McpServer): void {
       };
     }
   );
+
+  // ==========================================================================
+  // PROCEDURAL EFFECTS — Non-destructive effect tracks on layers/groups/global
+  // ==========================================================================
+
+  // ==========================================================================
+  // get_effect_blocks - List all effect blocks
+  // ==========================================================================
+  server.tool(
+    'get_effect_blocks',
+    'List all procedural effect blocks across layers, groups, and global effects. Shows effect type, timing, enabled status, and keyframe count.',
+    {
+      ownerId: z.string().optional().describe('Filter by owner layer/group ID. Omit to show all.'),
+    },
+    async ({ ownerId }) => {
+      const pm = getProjectManager();
+      let allTracks = pm.getAllEffectTracks();
+
+      if (ownerId !== undefined) {
+        allTracks = allTracks.filter(t => t.ownerId === ownerId);
+      }
+
+      const effects = allTracks.map(({ ownerId: oId, ownerType, track }) => ({
+        blockId: track.effectBlock.id,
+        trackId: track.id,
+        ownerId: oId,
+        ownerType,
+        effectType: track.effectBlock.effectType,
+        startFrame: track.effectBlock.startFrame,
+        durationFrames: track.effectBlock.durationFrames,
+        enabled: track.effectBlock.enabled,
+        settings: track.effectBlock.settings,
+        keyframedProperties: track.effectBlock.propertyTracks.map(pt => ({
+          property: pt.propertyPath,
+          keyframeCount: pt.keyframes.length,
+        })),
+      }));
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({
+          effectCount: effects.length,
+          effects,
+        }) }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // add_effect_block - Add a procedural effect to a layer/group/global
+  // ==========================================================================
+  server.tool(
+    'add_effect_block',
+    'Add a non-destructive procedural effect to a layer, group, or global effects. Available types: levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle.',
+    {
+      ownerId: z.string().nullable().describe('Layer or group ID to add effect to, or null for global effects'),
+      effectType: z.enum(['levels', 'hue-saturation', 'remap-colors', 'remap-characters', 'scatter', 'wave-warp', 'wiggle'])
+        .describe('Type of effect to add'),
+      startFrame: z.number().int().min(0).optional().describe('Start frame (defaults to 0)'),
+      durationFrames: z.number().int().min(1).optional().describe('Duration in frames (defaults to timeline duration)'),
+      settings: z.record(z.string(), z.unknown()).optional().describe('Initial effect settings'),
+    },
+    async ({ ownerId, effectType, startFrame, durationFrames, settings }) => {
+      const pm = getProjectManager();
+      const state = pm.getState();
+
+      const start = startFrame ?? 0;
+      const duration = durationFrames ?? Math.max(1, state.timelineConfig.durationFrames - start);
+
+      const track = pm.addEffectBlock(ownerId, effectType, start, duration, settings as Record<string, unknown> | undefined);
+      if (!track) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Owner not found', ownerId }) }],
+          isError: true,
+        };
+      }
+
+      broadcastStateChange('add_effect_block', { blockId: track.effectBlock.id, ownerId, effectType });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({
+          success: true,
+          blockId: track.effectBlock.id,
+          trackId: track.id,
+          effectType,
+          startFrame: start,
+          durationFrames: duration,
+        }) }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // update_effect_block - Update effect settings/timing
+  // ==========================================================================
+  server.tool(
+    'update_effect_block',
+    'Update a procedural effect block\'s settings, timing, or enabled state.',
+    {
+      blockId: z.string().describe('Effect block ID to update'),
+      startFrame: z.number().int().min(0).optional().describe('New start frame'),
+      durationFrames: z.number().int().min(1).optional().describe('New duration in frames'),
+      enabled: z.boolean().optional().describe('Enable/disable the effect'),
+      settings: z.record(z.string(), z.unknown()).optional().describe('Settings to merge (partial update)'),
+    },
+    async ({ blockId, startFrame, durationFrames, enabled, settings }) => {
+      const pm = getProjectManager();
+
+      const success = pm.updateEffectBlock(blockId, {
+        startFrame,
+        durationFrames,
+        enabled,
+        settings: settings as Record<string, unknown> | undefined,
+      });
+
+      if (!success) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Effect block not found', blockId }) }],
+          isError: true,
+        };
+      }
+
+      broadcastStateChange('update_effect_block', { blockId });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, blockId }) }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // remove_effect_block - Remove a procedural effect
+  // ==========================================================================
+  server.tool(
+    'remove_effect_block',
+    'Remove a procedural effect block from its owner (layer, group, or global).',
+    {
+      blockId: z.string().describe('Effect block ID to remove'),
+    },
+    async ({ blockId }) => {
+      const pm = getProjectManager();
+      const success = pm.removeEffectBlock(blockId);
+
+      if (!success) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Effect block not found', blockId }) }],
+          isError: true,
+        };
+      }
+
+      broadcastStateChange('remove_effect_block', { blockId });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, blockId }) }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // add_effect_keyframe - Add a keyframe to an effect property
+  // ==========================================================================
+  server.tool(
+    'add_effect_keyframe',
+    'Add a keyframe to a procedural effect property. Creates the property track if it doesn\'t exist.',
+    {
+      blockId: z.string().describe('Effect block ID'),
+      propertyPath: z.string().describe('Property path (e.g., "amplitude", "hue", "strength")'),
+      frame: z.number().int().min(0).describe('Frame number for the keyframe'),
+      value: z.union([z.number(), z.boolean(), z.string()]).describe('Keyframe value'),
+    },
+    async ({ blockId, propertyPath, frame, value }) => {
+      const pm = getProjectManager();
+      const kfId = pm.addEffectKeyframe(blockId, propertyPath, frame, value);
+
+      if (!kfId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Effect block not found', blockId }) }],
+          isError: true,
+        };
+      }
+
+      broadcastStateChange('add_effect_keyframe', { blockId, propertyPath, frame });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, keyframeId: kfId, blockId, propertyPath, frame, value }) }],
+      };
+    }
+  );
+
+  // ==========================================================================
+  // remove_effect_keyframe - Remove a keyframe from an effect property
+  // ==========================================================================
+  server.tool(
+    'remove_effect_keyframe',
+    'Remove a keyframe from a procedural effect property track.',
+    {
+      blockId: z.string().describe('Effect block ID'),
+      keyframeId: z.string().describe('Keyframe ID to remove'),
+    },
+    async ({ blockId, keyframeId }) => {
+      const pm = getProjectManager();
+      const success = pm.removeEffectKeyframe(blockId, keyframeId);
+
+      if (!success) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Effect block or keyframe not found', blockId, keyframeId }) }],
+          isError: true,
+        };
+      }
+
+      broadcastStateChange('remove_effect_keyframe', { blockId, keyframeId });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, blockId, keyframeId }) }],
+      };
+    }
+  );
 }
 
 // =============================================================================

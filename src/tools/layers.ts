@@ -47,6 +47,7 @@ export function registerLayerTools(server: McpServer): void {
         isActive: l.id === state.activeLayerId,
         contentFrameCount: l.contentFrames.length,
         propertyTrackCount: l.propertyTracks.length,
+        effectTrackCount: (l.effectTracks ?? []).length,
         parentGroupId: l.parentGroupId,
         totalCells: l.contentFrames.reduce((sum, cf) => sum + Object.keys(cf.data).length, 0),
       }));

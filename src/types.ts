@@ -243,6 +243,53 @@ export const ContentFrameSchema = z.object({
 export type MCPContentFrame = z.infer<typeof ContentFrameSchema>;
 
 /**
+ * An effect keyframe for animating effect properties.
+ */
+export const EffectKeyframeSchema = z.object({
+  id: z.string().describe('Unique keyframe identifier'),
+  frame: z.number().int().min(0).describe('Frame number'),
+  value: z.union([z.number(), z.boolean(), z.string(), z.record(z.string(), z.string())]).describe('Keyframe value'),
+  easing: EasingCurveSchema.describe('Easing curve'),
+});
+export type MCPEffectKeyframe = z.infer<typeof EffectKeyframeSchema>;
+
+/**
+ * An effect property track for keyframing a single property of an effect.
+ */
+export const EffectPropertyTrackSchema = z.object({
+  id: z.string().describe('Unique property track identifier'),
+  propertyPath: z.string().describe('Property path within effect settings'),
+  keyframes: z.array(EffectKeyframeSchema).describe('Keyframes on this property'),
+  loopKeyframes: z.boolean().optional().describe('Whether keyframes loop'),
+});
+export type MCPEffectPropertyTrack = z.infer<typeof EffectPropertyTrackSchema>;
+
+/**
+ * An effect block: a single effect instance with settings and timing.
+ */
+export const EffectBlockSchema = z.object({
+  id: z.string().describe('Unique effect block identifier'),
+  effectType: z.string().describe('Effect type (levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle)'),
+  startFrame: z.number().int().min(0).describe('Start frame of effect'),
+  durationFrames: z.number().int().min(1).describe('Duration in frames'),
+  enabled: z.boolean().default(true).describe('Whether effect is active'),
+  settings: z.record(z.string(), z.unknown()).describe('Effect-specific settings'),
+  propertyTracks: z.array(EffectPropertyTrackSchema).describe('Keyframed effect properties'),
+});
+export type MCPEffectBlock = z.infer<typeof EffectBlockSchema>;
+
+/**
+ * An effect track: wraps an effect block with ownership and UI state.
+ */
+export const EffectTrackSchema = z.object({
+  id: z.string().describe('Unique effect track identifier'),
+  ownerId: z.string().nullable().describe('Owner layer/group ID, null for global'),
+  effectBlock: EffectBlockSchema.describe('The effect block'),
+  collapsed: z.boolean().optional().describe('Whether track is collapsed in UI'),
+});
+export type MCPEffectTrack = z.infer<typeof EffectTrackSchema>;
+
+/**
  * A layer in the composition.
  */
 export const LayerSchema = z.object({
@@ -254,6 +301,7 @@ export const LayerSchema = z.object({
   opacity: z.number().min(0).max(100).default(100).describe('Layer opacity 0-100'),
   contentFrames: z.array(ContentFrameSchema).describe('Content frames on this layer'),
   propertyTracks: z.array(PropertyTrackSchema).describe('Keyframeable property tracks'),
+  effectTracks: z.array(EffectTrackSchema).optional().describe('Procedural effect tracks on this layer'),
   staticProperties: z.record(z.string(), z.number()).optional().describe('Non-keyframed property values'),
   parentGroupId: z.string().optional().describe('Parent group ID if in a group'),
   syncKeyframesToFrames: z.boolean().optional().describe('Sync keyframes when content frames move'),
@@ -272,6 +320,7 @@ export const LayerGroupSchema = z.object({
   locked: z.boolean().default(false),
   collapsed: z.boolean().default(false),
   propertyTracks: z.array(PropertyTrackSchema).optional().describe('Group-level keyframeable tracks'),
+  effectTracks: z.array(EffectTrackSchema).optional().describe('Procedural effect tracks on this group'),
   staticProperties: z.record(z.string(), z.number()).optional(),
 });
 export type MCPLayerGroup = z.infer<typeof LayerGroupSchema>;
@@ -289,7 +338,7 @@ export type TimelineConfig = z.infer<typeof TimelineConfigSchema>;
  * v2.0.0 Session data format with layer support.
  */
 export const SessionDataV2Schema = z.object({
-  version: z.literal('2.0.0'),
+  version: z.enum(['2.0.0', '2.1.0']),
   name: z.string().optional(),
   description: z.string().optional(),
   metadata: z.object({
@@ -343,6 +392,7 @@ export const SessionDataV2Schema = z.object({
   })),
 
   layerGroups: z.array(LayerGroupSchema).optional(),
+  globalEffects: z.array(EffectTrackSchema).optional(),
   tools: ToolStateSchema.optional(),
   typography: TypographySettingsSchema.optional(),
   ui: UIStateSchema.optional(),
@@ -357,6 +407,7 @@ export function detectSessionVersion(data: unknown): '1.0.0' | '2.0.0' | 'unknow
   if (typeof data !== 'object' || data === null) return 'unknown';
   const session = data as Record<string, unknown>;
   if (session.version === '2.0.0' && 'layers' in session) return '2.0.0';
+  if (session.version === '2.1.0' && 'layers' in session) return '2.0.0';
   if ('animation' in session) return '1.0.0';
   return 'unknown';
 }
@@ -394,6 +445,27 @@ export function generateKeyframeId(): string {
  */
 export function generateLayerGroupId(): string {
   return `group-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Generate a unique effect track ID.
+ */
+export function generateEffectTrackId(): string {
+  return `et-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Generate a unique effect block ID.
+ */
+export function generateEffectBlockId(): string {
+  return `eb-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Generate a unique effect property track ID.
+ */
+export function generateEffectPropertyTrackId(): string {
+  return `ept-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 // ============================================================================
