@@ -307,7 +307,7 @@ Make sure you're using the `--live` flag AND have connected the browser via MCP 
 ## Links
 
 - [ASCII Motion Web App](https://ascii-motion.app)
-- [Documentation](https://ascii-motion.com/docs/mcp)
+- [Documentation](https://docs.ascii-motion.com/getting-started)
 - [GitHub Issues](https://github.com/CameronFoxly/ascii-motion-mcp/issues)
 - [Discord Community](https://discord.gg/PVbpGgKQMy)
 
