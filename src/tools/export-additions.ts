@@ -26,11 +26,11 @@ export function registerAdditionalExportTools(server: McpServer): void {
     async ({ filePath, frameIndex, componentName, includeAnimation }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
-      const frames = includeAnimation 
-        ? state.frames 
+
+      const frames = includeAnimation
+        ? state.frames
         : [state.frames[frameIndex ?? state.currentFrameIndex]];
-      
+
       if (!frames[0]) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid frame index' }) }],
@@ -39,29 +39,29 @@ export function registerAdditionalExportTools(server: McpServer): void {
       }
 
       const code = generateInkComponent(componentName, frames, state.width, state.height, includeAnimation);
-      
+
       if (filePath) {
         const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
         const fullPath = path.resolve(projectDir, filePath);
-        
+
         if (!fullPath.startsWith(projectDir)) {
           return {
             content: [{ type: 'text', text: JSON.stringify({ error: 'Path must be within project directory' }) }],
             isError: true,
           };
         }
-        
+
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, code, 'utf-8');
-        
+
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) }) 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) })
           }],
         };
       }
-      
+
       return {
         content: [{ type: 'text', text: JSON.stringify({ code, componentName }) }],
       };
@@ -84,11 +84,11 @@ export function registerAdditionalExportTools(server: McpServer): void {
     async ({ filePath, frameIndex, packageName, modelName, includeAnimation }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
-      const frames = includeAnimation 
-        ? state.frames 
+
+      const frames = includeAnimation
+        ? state.frames
         : [state.frames[frameIndex ?? state.currentFrameIndex]];
-      
+
       if (!frames[0]) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid frame index' }) }],
@@ -97,29 +97,29 @@ export function registerAdditionalExportTools(server: McpServer): void {
       }
 
       const code = generateBubbleteaComponent(packageName, modelName, frames, state.width, state.height, includeAnimation);
-      
+
       if (filePath) {
         const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
         const fullPath = path.resolve(projectDir, filePath);
-        
+
         if (!fullPath.startsWith(projectDir)) {
           return {
             content: [{ type: 'text', text: JSON.stringify({ error: 'Path must be within project directory' }) }],
             isError: true,
           };
         }
-        
+
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, code, 'utf-8');
-        
+
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) }) 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) })
           }],
         };
       }
-      
+
       return {
         content: [{ type: 'text', text: JSON.stringify({ code, packageName, modelName }) }],
       };
@@ -141,11 +141,11 @@ export function registerAdditionalExportTools(server: McpServer): void {
     async ({ filePath, frameIndex, className, includeAnimation }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
-      const frames = includeAnimation 
-        ? state.frames 
+
+      const frames = includeAnimation
+        ? state.frames
         : [state.frames[frameIndex ?? state.currentFrameIndex]];
-      
+
       if (!frames[0]) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid frame index' }) }],
@@ -154,29 +154,29 @@ export function registerAdditionalExportTools(server: McpServer): void {
       }
 
       const code = generateOpenTuiComponent(className, frames, state.width, state.height, includeAnimation);
-      
+
       if (filePath) {
         const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
         const fullPath = path.resolve(projectDir, filePath);
-        
+
         if (!fullPath.startsWith(projectDir)) {
           return {
             content: [{ type: 'text', text: JSON.stringify({ error: 'Path must be within project directory' }) }],
             isError: true,
           };
         }
-        
+
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, code, 'utf-8');
-        
+
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) }) 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ success: true, filePath: fullPath, bytes: Buffer.byteLength(code) })
           }],
         };
       }
-      
+
       return {
         content: [{ type: 'text', text: JSON.stringify({ code, className }) }],
       };
@@ -201,7 +201,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
     async ({ filePath, frameIndex, scale, fontFamily, fontSize, cellWidth, cellHeight }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const frame = state.frames[frameIndex ?? state.currentFrameIndex];
       if (!frame) {
         return {
@@ -212,7 +212,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
 
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
-      
+
       if (!fullPath.startsWith(projectDir)) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Path must be within project directory' }) }],
@@ -221,13 +221,13 @@ export function registerAdditionalExportTools(server: McpServer): void {
       }
 
       const ext = path.extname(filePath).toLowerCase();
-      
+
       if (ext === '.svg') {
         // SVG export - works without dependencies
         const svg = generateSvgImage(
-          frame.data, 
-          state.width, 
-          state.height, 
+          frame.data,
+          state.width,
+          state.height,
           state.backgroundColor,
           scale,
           fontFamily,
@@ -235,42 +235,42 @@ export function registerAdditionalExportTools(server: McpServer): void {
           cellWidth,
           cellHeight
         );
-        
+
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, svg, 'utf-8');
-        
+
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ 
-              success: true, 
-              filePath: fullPath, 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              filePath: fullPath,
               format: 'svg',
               width: state.width * cellWidth * scale,
               height: state.height * cellHeight * scale,
-            }) 
+            })
           }],
         };
       } else if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') {
         // PNG/JPG requires canvas library
         try {
           // Dynamic import to avoid hard dependency
-          // @ts-ignore - optional dependency
+          // @ts-expect-error - optional dependency
           const { createCanvas } = await import('canvas');
-          
+
           const width = state.width * cellWidth * scale;
           const height = state.height * cellHeight * scale;
           const canvas = createCanvas(width, height);
           const ctx = canvas.getContext('2d');
-          
+
           // Fill background
           ctx.fillStyle = state.backgroundColor || '#1a1a2e';
           ctx.fillRect(0, 0, width, height);
-          
+
           // Set font
           ctx.font = `${fontSize * scale}px ${fontFamily}`;
           ctx.textBaseline = 'top';
-          
+
           // Render each cell
           for (let y = 0; y < state.height; y++) {
             for (let x = 0; x < state.width; x++) {
@@ -278,48 +278,48 @@ export function registerAdditionalExportTools(server: McpServer): void {
               if (cell) {
                 const px = x * cellWidth * scale;
                 const py = y * cellHeight * scale;
-                
+
                 // Draw background
                 if (cell.bgColor && cell.bgColor !== 'transparent') {
                   ctx.fillStyle = cell.bgColor;
                   ctx.fillRect(px, py, cellWidth * scale, cellHeight * scale);
                 }
-                
+
                 // Draw character
                 ctx.fillStyle = cell.color;
                 ctx.fillText(cell.char, px + 1, py + 2);
               }
             }
           }
-          
+
           // Export as buffer
-          const buffer = ext === '.png' 
+          const buffer = ext === '.png'
             ? canvas.toBuffer('image/png')
             : canvas.toBuffer('image/jpeg', { quality: 0.9 });
-          
+
           await fs.mkdir(path.dirname(fullPath), { recursive: true });
           await fs.writeFile(fullPath, buffer);
-          
+
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
-                success: true, 
-                filePath: fullPath, 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                filePath: fullPath,
                 format: ext.slice(1),
                 width,
                 height,
-              }) 
+              })
             }],
           };
         } catch (_e) {
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
                 error: 'PNG/JPG export requires the "canvas" npm package. Install with: npm install canvas',
                 suggestion: 'Use .svg export which works without dependencies.',
-              }) 
+              })
             }],
             isError: true,
           };
@@ -351,7 +351,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
     async ({ filePath, scale, fontFamily, fontSize, cellWidth, cellHeight, loop }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       if (state.frames.length === 0) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'No frames to export' }) }],
@@ -361,7 +361,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
 
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
-      
+
       if (!fullPath.startsWith(projectDir)) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Path must be within project directory' }) }],
@@ -372,32 +372,32 @@ export function registerAdditionalExportTools(server: McpServer): void {
       const ext = path.extname(filePath).toLowerCase();
       const width = state.width * cellWidth * scale;
       const height = state.height * cellHeight * scale;
-      
+
       if (ext === '.gif') {
         // GIF export using gif-encoder-2 (if available)
         try {
-          // @ts-ignore - optional dependency
+          // @ts-expect-error - optional dependency
           const { createCanvas } = await import('canvas');
-          // @ts-ignore - optional dependency
+          // @ts-expect-error - optional dependency
           const GIFEncoder = (await import('gif-encoder-2')).default;
-          
+
           const encoder = new GIFEncoder(width, height);
           encoder.setDelay(state.frames[0].duration);
           encoder.setRepeat(loop ? 0 : -1);
           encoder.start();
-          
+
           for (const frame of state.frames) {
             const canvas = createCanvas(width, height);
             const ctx = canvas.getContext('2d');
-            
+
             // Fill background
             ctx.fillStyle = state.backgroundColor || '#1a1a2e';
             ctx.fillRect(0, 0, width, height);
-            
+
             // Set font
             ctx.font = `${fontSize * scale}px ${fontFamily}`;
             ctx.textBaseline = 'top';
-            
+
             // Render each cell
             for (let y = 0; y < state.height; y++) {
               for (let x = 0; x < state.width; x++) {
@@ -405,49 +405,49 @@ export function registerAdditionalExportTools(server: McpServer): void {
                 if (cell) {
                   const px = x * cellWidth * scale;
                   const py = y * cellHeight * scale;
-                  
+
                   if (cell.bgColor && cell.bgColor !== 'transparent') {
                     ctx.fillStyle = cell.bgColor;
                     ctx.fillRect(px, py, cellWidth * scale, cellHeight * scale);
                   }
-                  
+
                   ctx.fillStyle = cell.color;
                   ctx.fillText(cell.char, px + 1, py + 2);
                 }
               }
             }
-            
+
             encoder.setDelay(frame.duration);
             encoder.addFrame(ctx);
           }
-          
+
           encoder.finish();
           const buffer = encoder.out.getData();
-          
+
           await fs.mkdir(path.dirname(fullPath), { recursive: true });
           await fs.writeFile(fullPath, buffer);
-          
+
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
-                success: true, 
-                filePath: fullPath, 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                filePath: fullPath,
                 format: 'gif',
                 width,
                 height,
                 frameCount: state.frames.length,
                 totalDuration: state.frames.reduce((sum, f) => sum + f.duration, 0),
-              }) 
+              })
             }],
           };
         } catch (_e) {
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
                 error: 'GIF export requires "canvas" and "gif-encoder-2" packages. Install with: npm install canvas gif-encoder-2',
-              }) 
+              })
             }],
             isError: true,
           };
@@ -455,13 +455,13 @@ export function registerAdditionalExportTools(server: McpServer): void {
       } else if (ext === '.mp4' || ext === '.webm') {
         // MP4/WebM requires ffmpeg - generate frame images and use ffmpeg
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
               error: 'MP4/WebM export requires ffmpeg which is not yet integrated.',
               suggestion: 'Use .gif export, or export as SVG frames and use ffmpeg manually.',
               ffmpegHint: 'ffmpeg -framerate 10 -i frame%03d.png -c:v libx264 -pix_fmt yuv420p output.mp4',
-            }) 
+            })
           }],
           isError: true,
         };
@@ -480,18 +480,18 @@ export function registerAdditionalExportTools(server: McpServer): void {
 // =============================================================================
 
 function generateInkComponent(
-  componentName: string, 
-  frames: Frame[], 
-  width: number, 
-  height: number, 
+  componentName: string,
+  frames: Frame[],
+  width: number,
+  height: number,
   includeAnimation: boolean
 ): string {
   const lines: string[] = [];
-  
+
   lines.push(`import React${includeAnimation ? ', { useState, useEffect }' : ''} from 'react';`);
   lines.push(`import { Box, Text } from 'ink';`);
   lines.push('');
-  
+
   // Generate frame data
   if (includeAnimation) {
     lines.push(`const frames = ${JSON.stringify(frames.map(f => ({
@@ -503,9 +503,9 @@ function generateInkComponent(
     lines.push(`const frameData = ${JSON.stringify(frames[0].data, null, 2)};`);
     lines.push('');
   }
-  
+
   lines.push(`export const ${componentName}: React.FC = () => {`);
-  
+
   if (includeAnimation) {
     lines.push('  const [frameIndex, setFrameIndex] = useState(0);');
     lines.push('');
@@ -520,7 +520,7 @@ function generateInkComponent(
   } else {
     lines.push('  const currentFrame = frameData;');
   }
-  
+
   lines.push('');
   lines.push('  const rows = [];');
   lines.push(`  for (let y = 0; y < ${height}; y++) {`);
@@ -544,7 +544,7 @@ function generateInkComponent(
   lines.push('};');
   lines.push('');
   lines.push(`export default ${componentName};`);
-  
+
   return lines.join('\n');
 }
 
@@ -557,7 +557,7 @@ function generateBubbleteaComponent(
   includeAnimation: boolean
 ): string {
   const lines: string[] = [];
-  
+
   lines.push(`package ${packageName}`);
   lines.push('');
   lines.push('import (');
@@ -570,7 +570,7 @@ function generateBubbleteaComponent(
   lines.push('\t"github.com/charmbracelet/lipgloss"');
   lines.push(')');
   lines.push('');
-  
+
   // Generate cell and frame types
   lines.push('type Cell struct {');
   lines.push('\tChar    string');
@@ -578,18 +578,18 @@ function generateBubbleteaComponent(
   lines.push('\tBgColor string');
   lines.push('}');
   lines.push('');
-  
+
   if (includeAnimation) {
     lines.push('type Frame struct {');
     lines.push('\tData     map[string]Cell');
     lines.push('\tDuration time.Duration');
     lines.push('}');
     lines.push('');
-    
+
     lines.push('type tickMsg time.Time');
     lines.push('');
   }
-  
+
   // Generate model
   lines.push(`type ${modelName} struct {`);
   lines.push(`\tWidth  int`);
@@ -602,13 +602,13 @@ function generateBubbleteaComponent(
   }
   lines.push('}');
   lines.push('');
-  
+
   // Generate constructor
   lines.push(`func New${modelName}() ${modelName} {`);
   lines.push(`\treturn ${modelName}{`);
   lines.push(`\t\tWidth:  ${width},`);
   lines.push(`\t\tHeight: ${height},`);
-  
+
   if (includeAnimation) {
     lines.push('\t\tFrames: []Frame{');
     for (const frame of frames) {
@@ -630,11 +630,11 @@ function generateBubbleteaComponent(
     }
     lines.push('\t\t},');
   }
-  
+
   lines.push('\t}');
   lines.push('}');
   lines.push('');
-  
+
   // Init function
   lines.push(`func (m ${modelName}) Init() tea.Cmd {`);
   if (includeAnimation) {
@@ -644,7 +644,7 @@ function generateBubbleteaComponent(
   }
   lines.push('}');
   lines.push('');
-  
+
   if (includeAnimation) {
     lines.push(`func (m ${modelName}) tick() tea.Cmd {`);
     lines.push('\treturn tea.Tick(m.Frames[m.FrameIndex].Duration, func(t time.Time) tea.Msg {');
@@ -653,7 +653,7 @@ function generateBubbleteaComponent(
     lines.push('}');
     lines.push('');
   }
-  
+
   // Update function
   lines.push(`func (m ${modelName}) Update(msg tea.Msg) (tea.Model, tea.Cmd) {`);
   lines.push('\tswitch msg := msg.(type) {');
@@ -670,7 +670,7 @@ function generateBubbleteaComponent(
   lines.push('\treturn m, nil');
   lines.push('}');
   lines.push('');
-  
+
   // View function
   lines.push(`func (m ${modelName}) View() string {`);
   lines.push('\tvar sb strings.Builder');
@@ -698,7 +698,7 @@ function generateBubbleteaComponent(
   lines.push('');
   lines.push('\treturn sb.String()');
   lines.push('}');
-  
+
   return lines.join('\n');
 }
 
@@ -710,7 +710,7 @@ function generateOpenTuiComponent(
   includeAnimation: boolean
 ): string {
   const lines: string[] = [];
-  
+
   lines.push('"""');
   lines.push(`ASCII Art Display Component - ${className}`);
   lines.push('Generated by ASCII Motion MCP Server');
@@ -740,7 +740,7 @@ function generateOpenTuiComponent(
   lines.push('    def __init__(self):');
   lines.push(`        self.width = ${width}`);
   lines.push(`        self.height = ${height}`);
-  
+
   if (includeAnimation) {
     lines.push('        self.frames = [');
     for (const frame of frames) {
@@ -763,7 +763,7 @@ function generateOpenTuiComponent(
     lines.push('        }');
   }
   lines.push('');
-  
+
   lines.push('    def get_cell(self, x: int, y: int) -> Optional[Cell]:');
   lines.push('        """Get cell at coordinates."""');
   if (includeAnimation) {
@@ -772,7 +772,7 @@ function generateOpenTuiComponent(
     lines.push('        return self.data.get(f"{x},{y}")');
   }
   lines.push('');
-  
+
   if (includeAnimation) {
     lines.push('    def next_frame(self) -> None:');
     lines.push('        """Advance to next frame."""');
@@ -790,7 +790,7 @@ function generateOpenTuiComponent(
     lines.push('            self.next_frame()');
     lines.push('');
   }
-  
+
   lines.push('    def render(self) -> str:');
   lines.push('        """Render the current frame as a string."""');
   lines.push('        output = []');
@@ -839,7 +839,7 @@ function generateOpenTuiComponent(
   } else {
     lines.push('    print(display.render_with_ansi())');
   }
-  
+
   return lines.join('\n');
 }
 
@@ -856,32 +856,32 @@ function generateSvgImage(
 ): string {
   const svgWidth = width * cellWidth * scale;
   const svgHeight = height * cellHeight * scale;
-  
+
   const lines: string[] = [];
   lines.push(`<?xml version="1.0" encoding="UTF-8"?>`);
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">`);
   lines.push(`  <rect width="100%" height="100%" fill="${backgroundColor || '#1a1a2e'}"/>`);
   lines.push(`  <style>text { font-family: ${fontFamily}; font-size: ${fontSize * scale}px; dominant-baseline: text-before-edge; }</style>`);
-  
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const cell = data[`${x},${y}`];
       if (cell) {
         const px = x * cellWidth * scale;
         const py = y * cellHeight * scale;
-        
+
         // Draw background rect if color is set
         if (cell.bgColor && cell.bgColor !== 'transparent') {
           lines.push(`  <rect x="${px}" y="${py}" width="${cellWidth * scale}" height="${cellHeight * scale}" fill="${cell.bgColor}"/>`);
         }
-        
+
         // Draw character
         const escapedChar = escapeXml(cell.char);
         lines.push(`  <text x="${px + 1}" y="${py + 2}" fill="${cell.color}">${escapedChar}</text>`);
       }
     }
   }
-  
+
   lines.push('</svg>');
   return lines.join('\n');
 }

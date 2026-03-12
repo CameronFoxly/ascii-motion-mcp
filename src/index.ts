@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * ASCII Motion MCP Server
- * 
+ *
  * A Model Context Protocol server for creating and animating ASCII art.
- * 
+ *
  * Usage:
  *   npx ascii-motion-mcp                    # Start in stdio mode
  *   npx ascii-motion-mcp --project-dir ./   # Specify project directory
  *   npx ascii-motion-mcp --live             # Enable live browser sync
  *   npx ascii-motion-mcp --help             # Show help
- * 
+ *
  * For MCP Inspector testing:
  *   npx @modelcontextprotocol/inspector /path/to/run-server.sh
  */
@@ -33,8 +33,11 @@ import {
   registerImportTools,
   registerPaletteTools,
   registerSyncTools,
-  setRequestBrowserStateCallback,
+  setSyncToolsBrowserStateCallback,
+  setConnectionToolsBrowserStateCallback,
+  setRequestAuthTokenCallback,
   registerLayerTools,
+  registerConnectionTools,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
@@ -60,10 +63,10 @@ function parseArgs(): CLIOptions {
     live: false,
     port: 9876,
   };
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === '--help' || arg === '-h') {
       options.help = true;
     } else if (arg === '--version' || arg === '-v') {
@@ -82,7 +85,7 @@ function parseArgs(): CLIOptions {
       }
     }
   }
-  
+
   return options;
 }
 
@@ -137,7 +140,7 @@ For detailed documentation, visit:
 }
 
 function showVersion(): void {
-  console.log('ascii-motion-mcp v2.0.0');
+  console.log('ascii-motion-mcp v2.1.0');
 }
 
 // =============================================================================
@@ -146,26 +149,26 @@ function showVersion(): void {
 
 async function main(): Promise<void> {
   const options = parseArgs();
-  
+
   if (options.help) {
     showHelp();
     process.exit(0);
   }
-  
+
   if (options.version) {
     showVersion();
     process.exit(0);
   }
-  
+
   // Set project directory in environment for tools to use
   process.env.ASCII_MOTION_PROJECT_DIR = options.projectDir;
-  
+
   // Create the MCP server
   const server = new McpServer({
     name: 'ascii-motion-mcp',
-    version: '2.0.0',
+    version: '2.1.0',
   });
-  
+
   // Register all tools
   registerCanvasTools(server);
   registerFrameTools(server);
@@ -182,42 +185,51 @@ async function main(): Promise<void> {
   registerPaletteTools(server);
   registerSyncTools(server);
   registerLayerTools(server);
-  
+  registerConnectionTools(server);
+
   // Register resources
   registerResources(server);
-  
+
   // Register prompts
   registerPrompts(server);
-  
+
   // Initialize project manager
   getProjectManager();
-  
+
   // Set up live mode if enabled
   let hybridTransport: HybridTransport | null = null;
-  
+
   if (options.live) {
     hybridTransport = new HybridTransport(options.port, '127.0.0.1');
-    
+
     // Set up WebSocket broadcaster for state changes
     setWebSocketBroadcaster((type, data) => {
       hybridTransport?.broadcastStateChange(type, data);
     });
-    
+
     // Start WebSocket server
     await hybridTransport.startWebSocket();
-    
+
     // Handle state snapshots from browser (syncs browser state to MCP)
     hybridTransport.wsServer.onStateSnapshot = (snapshot: unknown) => {
       const pm = getProjectManager();
       pm.loadFromBrowserSnapshot(snapshot);
     };
-    
-    
-    // Wire up the refresh_state_from_browser tool
-    setRequestBrowserStateCallback(async (): Promise<boolean> => {
+
+    const browserStateCallback = async (): Promise<boolean> => {
       if (!hybridTransport) return false;
       return hybridTransport.requestStateFromBrowser();
-    });
+    };
+
+    const tokenCallback = async (): Promise<string|undefined> => {
+      if (!hybridTransport) return Promise.resolve(undefined);
+      return Promise.resolve(hybridTransport.authToken);
+    };
+
+    // Wire up the refresh_state_from_browser tool
+    setSyncToolsBrowserStateCallback(browserStateCallback);
+    setConnectionToolsBrowserStateCallback(browserStateCallback);
+    setRequestAuthTokenCallback(tokenCallback);
 
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
@@ -227,17 +239,17 @@ async function main(): Promise<void> {
     console.error(`[ascii-motion-mcp] Browser connect URL:`);
     console.error(`  ws://127.0.0.1:${options.port}/?token=${hybridTransport.authToken}`);
   }
-  
+
   // Log startup (to stderr so it doesn't interfere with MCP protocol)
   console.error(`[ascii-motion-mcp] Starting server...`);
   console.error(`[ascii-motion-mcp] Project directory: ${options.projectDir}`);
-  
+
   // Connect via stdio transport (for MCP protocol)
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  
+
   console.error(`[ascii-motion-mcp] Server connected and ready`);
-  
+
   // Handle shutdown
   const shutdown = async () => {
     console.error('[ascii-motion-mcp] Shutting down...');
@@ -246,7 +258,7 @@ async function main(): Promise<void> {
     }
     process.exit(0);
   };
-  
+
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

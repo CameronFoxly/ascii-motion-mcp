@@ -1,6 +1,6 @@
 /**
  * Import Tools
- * 
+ *
  * Tools for importing images and videos as ASCII art:
  * - import_image: Import an image and convert to ASCII
  * - import_video: Import video frames as animation
@@ -33,10 +33,10 @@ export function registerImportTools(server: McpServer): void {
     async ({ filePath, targetWidth, targetHeight, charset, colorMode, dithering, frameIndex, offsetX, offsetY }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
-      
+
       // Check file exists
       try {
         await fs.access(fullPath);
@@ -50,25 +50,25 @@ export function registerImportTools(server: McpServer): void {
       // Determine target dimensions
       const width = targetWidth ?? state.width;
       const height = targetHeight ?? Math.floor(width / 2); // Approximate aspect ratio for terminal chars
-      
+
       try {
         // Try to use sharp for image processing
-        // @ts-ignore - optional dependency
+        // @ts-expect-error - optional dependency
         const sharp = await import('sharp');
-        
+
         // Read and resize image
         const image = sharp.default(fullPath);
         const metadata = await image.metadata();
-        
+
         // Resize to target dimensions
         const resized = await image
           .resize(width, height, { fit: 'fill' })
           .raw()
           .toBuffer({ resolveWithObject: true });
-        
+
         const { data, info } = resized;
         const channels = info.channels;
-        
+
         // Convert to ASCII
         const frameIdx = frameIndex ?? state.currentFrameIndex;
         const frame = state.frames[frameIdx];
@@ -78,9 +78,9 @@ export function registerImportTools(server: McpServer): void {
             isError: true,
           };
         }
-        
+
         const cellsToSet: Array<{ x: number; y: number; char: string; color: string; bgColor: string }> = [];
-        
+
         for (let y = 0; y < info.height; y++) {
           for (let x = 0; x < info.width; x++) {
             const idx = (y * info.width + x) * channels;
@@ -88,13 +88,13 @@ export function registerImportTools(server: McpServer): void {
             const g = data[idx + 1];
             const b = data[idx + 2];
             const a = channels === 4 ? data[idx + 3] : 255;
-            
+
             // Skip transparent pixels
             if (a < 128) continue;
-            
+
             // Calculate brightness (0-1)
             let brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
+
             // Apply dithering if requested
             if (dithering === 'ordered') {
               // 4x4 Bayer matrix dithering
@@ -108,26 +108,26 @@ export function registerImportTools(server: McpServer): void {
               brightness = brightness + (threshold - 0.5) * 0.2;
               brightness = Math.max(0, Math.min(1, brightness));
             }
-            
+
             // Map brightness to character
             const charIndex = Math.floor(brightness * (charset.length - 1));
             const char = charset[charIndex];
-            
+
             // Determine colors
             const hexColor = rgbToHex(r, g, b);
             let fgColor = '#ffffff';
             let bgColor = 'transparent';
-            
+
             if (colorMode === 'foreground' || colorMode === 'both') {
               fgColor = hexColor;
             }
             if (colorMode === 'background' || colorMode === 'both') {
               bgColor = hexColor;
             }
-            
+
             const canvasX = x + offsetX;
             const canvasY = y + offsetY;
-            
+
             if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
               cellsToSet.push({
                 x: canvasX,
@@ -139,21 +139,21 @@ export function registerImportTools(server: McpServer): void {
             }
           }
         }
-        
+
         // Apply Floyd-Steinberg dithering post-process if requested
         // (This is a simplified version - true F-S would need error diffusion during processing)
-        
+
         // Set all cells
         for (const cell of cellsToSet) {
           pm.setCell(cell.x, cell.y, { char: cell.char, color: cell.color, bgColor: cell.bgColor });
         }
-        
+
           // Broadcast import completed
           broadcastStateChange('import_image', { cellsCreated: cellsToSet.length });
         return {
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ 
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
               success: true,
               sourceFile: fullPath,
               sourceDimensions: { width: metadata.width, height: metadata.height },
@@ -161,52 +161,52 @@ export function registerImportTools(server: McpServer): void {
               cellsCreated: cellsToSet.length,
               colorMode,
               charset,
-            }) 
+            })
           }],
         };
-      } catch (e) {
+      } catch (_e) {
         // Fall back to jimp if sharp is not available
         try {
-          // @ts-ignore - optional dependency
+          // @ts-expect-error - optional dependency
           const Jimp = (await import('jimp')).default;
-          
+
           const image = await Jimp.read(fullPath);
-          
+
           // Resize to target dimensions
           image.resize(width, height);
-          
+
           const cellsToSet: Array<{ x: number; y: number; char: string; color: string; bgColor: string }> = [];
-          
+
           for (let y = 0; y < image.getHeight(); y++) {
             for (let x = 0; x < image.getWidth(); x++) {
               const pixelColor = image.getPixelColor(x, y);
               const { r, g, b, a } = Jimp.intToRGBA(pixelColor);
-              
+
               // Skip transparent pixels
               if (a < 128) continue;
-              
+
               // Calculate brightness
-              let brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-              
+              const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
               // Map brightness to character
               const charIndex = Math.floor(brightness * (charset.length - 1));
               const char = charset[charIndex];
-              
+
               // Determine colors
               const hexColor = rgbToHex(r, g, b);
               let fgColor = '#ffffff';
               let bgColor = 'transparent';
-              
+
               if (colorMode === 'foreground' || colorMode === 'both') {
                 fgColor = hexColor;
               }
               if (colorMode === 'background' || colorMode === 'both') {
                 bgColor = hexColor;
               }
-              
+
               const canvasX = x + offsetX;
               const canvasY = y + offsetY;
-              
+
               if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
                 cellsToSet.push({
                   x: canvasX,
@@ -218,16 +218,16 @@ export function registerImportTools(server: McpServer): void {
               }
             }
           }
-          
+
           // Set all cells
           for (const cell of cellsToSet) {
             pm.setCell(cell.x, cell.y, { char: cell.char, color: cell.color, bgColor: cell.bgColor });
           }
-          
+
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
                 success: true,
                 sourceFile: fullPath,
                 targetDimensions: { width, height },
@@ -235,18 +235,18 @@ export function registerImportTools(server: McpServer): void {
                 colorMode,
                 charset,
                 note: 'Used jimp for image processing',
-              }) 
+              })
             }],
           };
         } catch (_e2) {
           return {
-            content: [{ 
-              type: 'text', 
-              text: JSON.stringify({ 
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
                 error: 'Image import requires either "sharp" or "jimp" npm package.',
                 installCommand: 'npm install sharp  # or: npm install jimp',
                 alternativeHint: 'You can also manually convert images using an external tool and paste the ASCII text using paste_ascii_block.',
-              }) 
+              })
             }],
             isError: true,
           };
@@ -275,10 +275,10 @@ export function registerImportTools(server: McpServer): void {
     async ({ filePath, targetWidth, targetHeight, charset, colorMode, fps, maxFrames, startTime, duration }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
-      
+
       // Check file exists
       try {
         await fs.access(fullPath);
@@ -295,11 +295,11 @@ export function registerImportTools(server: McpServer): void {
       // 1. ffmpeg to extract frames to temp directory
       // 2. Process each frame using import_image logic
       // 3. Create frames in animation
-      
+
       return {
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ 
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
             error: 'Video import is not yet fully implemented in headless mode.',
             suggestion: 'For now, you can:',
             steps: [
@@ -318,7 +318,7 @@ export function registerImportTools(server: McpServer): void {
               startTime,
               duration: duration ?? 'full video',
             },
-          }) 
+          })
         }],
         isError: true,
       };
@@ -343,10 +343,10 @@ export function registerImportTools(server: McpServer): void {
     async ({ filePath, frameIndex: _frameIndex, offsetX, offsetY, color, bgColor, replaceSpaces }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
-      
+
       // Security: ensure path is within project dir
       if (!fullPath.startsWith(projectDir)) {
         return {
@@ -354,7 +354,7 @@ export function registerImportTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       // Read file
       let content: string;
       try {
@@ -365,40 +365,40 @@ export function registerImportTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       const lines = content.split('\n');
       let cellsSet = 0;
-      
+
       for (let y = 0; y < lines.length; y++) {
         const line = lines[y];
         for (let x = 0; x < line.length; x++) {
           const char = line[x];
-          
+
           // Skip spaces unless replaceSpaces is true
           if (char === ' ' && !replaceSpaces) continue;
-          
+
           const canvasX = x + offsetX;
           const canvasY = y + offsetY;
-          
+
           if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
             pm.setCell(canvasX, canvasY, { char, color, bgColor });
             cellsSet++;
           }
         }
       }
-      
+
       // Broadcast import completed
       broadcastStateChange('import_ascii_text', { cellsSet });
       return {
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ 
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
             success: true,
             sourceFile: fullPath,
             dimensions: { width: Math.max(...lines.map(l => l.length)), height: lines.length },
             cellsSet,
             offset: { x: offsetX, y: offsetY },
-          }) 
+          })
         }],
       };
     }

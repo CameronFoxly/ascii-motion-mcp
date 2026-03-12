@@ -1,6 +1,6 @@
 /**
  * Animation Workflow Tools
- * 
+ *
  * Higher-level tools for common animation tasks.
  */
 
@@ -33,14 +33,14 @@ export function registerAnimationTools(server: McpServer): void {
     async ({ sourceIndex, modifications, insertAtIndex: _insertAtIndex, name, duration }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       if (sourceIndex < 0 || sourceIndex >= state.frames.length) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Source frame index out of range' }) }],
           isError: true,
         };
       }
-      
+
       // Duplicate the frame
       const newFrame = pm.duplicateFrame(sourceIndex, false);
       if (!newFrame) {
@@ -49,18 +49,18 @@ export function registerAnimationTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       // Find the new frame index
       const newIndex = pm.getState().frames.findIndex(f => f.id === newFrame.id);
-      
+
       // Navigate to the new frame to apply modifications
       pm.goToFrame(newIndex);
-      
+
       // Apply modifications
       let modified = 0;
       for (const mod of modifications) {
         if (!isInBounds(mod.x, mod.y, state.width, state.height)) continue;
-        
+
         if (mod.clear) {
           pm.clearCell(mod.x, mod.y, false);
         } else {
@@ -73,7 +73,7 @@ export function registerAnimationTools(server: McpServer): void {
         }
         modified++;
       }
-      
+
       // Set name and duration if provided
       if (name) {
         pm.setFrameName(newIndex, name, false);
@@ -81,12 +81,12 @@ export function registerAnimationTools(server: McpServer): void {
       if (duration) {
         pm.setFrameDuration(newIndex, duration, false);
       }
-      
+
       // Move frame if insertAtIndex differs from default position
       // (For simplicity, we're not implementing reordering here - would need to add to state manager)
-      
+
       const updatedState = pm.getState();
-      
+
       // Broadcast the new frame with all its data
       broadcastStateChange('copy_frame_and_modify', {
         newFrame: {
@@ -98,10 +98,10 @@ export function registerAnimationTools(server: McpServer): void {
         },
         totalFrames: updatedState.frames.length,
       });
-      
+
       return {
-        content: [{ 
-          type: 'text', 
+        content: [{
+          type: 'text',
           text: JSON.stringify({
             success: true,
             newFrame: {
@@ -112,7 +112,7 @@ export function registerAnimationTools(server: McpServer): void {
             },
             modificationsApplied: modified,
             totalFrames: updatedState.frames.length,
-          }) 
+          })
         }],
       };
     }
@@ -133,7 +133,7 @@ export function registerAnimationTools(server: McpServer): void {
     async ({ dx, dy, wrap, frameIndex }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const idx = frameIndex ?? state.currentFrameIndex;
       if (idx < 0 || idx >= state.frames.length) {
         return {
@@ -141,27 +141,27 @@ export function registerAnimationTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       // Navigate to the frame
       pm.goToFrame(idx);
       const frame = pm.getCurrentFrame();
       const oldData = { ...frame.data };
       const newData: CanvasData = {};
-      
+
       let cellsShifted = 0;
       let cellsLost = 0;
-      
+
       for (const [key, cell] of Object.entries(oldData)) {
         const { x, y } = parseCellKey(key);
         let newX = x + dx;
         let newY = y + dy;
-        
+
         if (wrap) {
           // Wrap around edges
           newX = ((newX % state.width) + state.width) % state.width;
           newY = ((newY % state.height) + state.height) % state.height;
         }
-        
+
         if (isInBounds(newX, newY, state.width, state.height)) {
           newData[createCellKey(newX, newY)] = cell;
           cellsShifted++;
@@ -169,22 +169,22 @@ export function registerAnimationTools(server: McpServer): void {
           cellsLost++;
         }
       }
-      
+
       // Replace frame data
       frame.data = newData;
-      
+
       // Broadcast shift completed
       broadcastStateChange('shift_frame_content', { dx, dy, cellsShifted });
       return {
-        content: [{ 
-          type: 'text', 
+        content: [{
+          type: 'text',
           text: JSON.stringify({
             success: true,
             shift: { dx, dy },
             wrap,
             cellsShifted,
             cellsLost,
-          }) 
+          })
         }],
       };
     }
@@ -209,7 +209,7 @@ export function registerAnimationTools(server: McpServer): void {
     async ({ direction, region, frameIndex }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       const idx = frameIndex ?? state.currentFrameIndex;
       if (idx < 0 || idx >= state.frames.length) {
         return {
@@ -217,18 +217,18 @@ export function registerAnimationTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       pm.goToFrame(idx);
       const frame = pm.getCurrentFrame();
-      
+
       const regionX = region?.x ?? 0;
       const regionY = region?.y ?? 0;
       const regionWidth = region?.width ?? state.width;
       const regionHeight = region?.height ?? state.height;
-      
+
       // Collect cells in region
       const cellsInRegion: Array<{ x: number; y: number; cell: Cell }> = [];
-      
+
       for (const [key, cell] of Object.entries(frame.data)) {
         const { x, y } = parseCellKey(key);
         if (x >= regionX && x < regionX + regionWidth && y >= regionY && y < regionY + regionHeight) {
@@ -236,33 +236,33 @@ export function registerAnimationTools(server: McpServer): void {
           delete frame.data[key]; // Remove original
         }
       }
-      
+
       // Place flipped cells
       for (const { x, y, cell } of cellsInRegion) {
         let newX = x;
         let newY = y;
-        
+
         if (direction === 'horizontal') {
           // Mirror around the center of the region
           newX = regionX + (regionWidth - 1) - (x - regionX);
         } else {
           newY = regionY + (regionHeight - 1) - (y - regionY);
         }
-        
+
         frame.data[createCellKey(newX, newY)] = cell;
       }
-      
+
       // Broadcast flip completed
       broadcastStateChange('flip_region', { direction, cellsFlipped: cellsInRegion.length });
       return {
-        content: [{ 
-          type: 'text', 
+        content: [{
+          type: 'text',
           text: JSON.stringify({
             success: true,
             direction,
             region: { x: regionX, y: regionY, width: regionWidth, height: regionHeight },
             cellsFlipped: cellsInRegion.length,
-          }) 
+          })
         }],
       };
     }
@@ -292,7 +292,7 @@ export function registerAnimationTools(server: McpServer): void {
     async ({ sourceFrame, targetFrame, sourceRegion, targetPosition, overwrite }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       if (sourceFrame < 0 || sourceFrame >= state.frames.length) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Source frame index out of range' }) }],
@@ -305,57 +305,57 @@ export function registerAnimationTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       const srcFrame = state.frames[sourceFrame];
       const tgtFrame = state.frames[targetFrame];
-      
+
       const offsetX = (targetPosition?.x ?? sourceRegion.x) - sourceRegion.x;
       const offsetY = (targetPosition?.y ?? sourceRegion.y) - sourceRegion.y;
-      
+
       let cellsCopied = 0;
       let cellsSkipped = 0;
-      
+
       for (const [key, cell] of Object.entries(srcFrame.data)) {
         const { x, y } = parseCellKey(key);
-        
+
         if (x >= sourceRegion.x && x < sourceRegion.x + sourceRegion.width &&
             y >= sourceRegion.y && y < sourceRegion.y + sourceRegion.height) {
-          
+
           const newX = x + offsetX;
           const newY = y + offsetY;
-          
+
           if (!isInBounds(newX, newY, state.width, state.height)) {
             cellsSkipped++;
             continue;
           }
-          
+
           const newKey = createCellKey(newX, newY);
-          
+
           if (!overwrite && tgtFrame.data[newKey]) {
             cellsSkipped++;
             continue;
           }
-          
+
           tgtFrame.data[newKey] = { ...cell };
           cellsCopied++;
         }
       }
-      
+
       // Broadcast with full frame data so browser can sync
-      broadcastStateChange('set_frame_data', { 
-        frameIndex: targetFrame, 
-        data: tgtFrame.data 
+      broadcastStateChange('set_frame_data', {
+        frameIndex: targetFrame,
+        data: tgtFrame.data
       });
       return {
-        content: [{ 
-          type: 'text', 
+        content: [{
+          type: 'text',
           text: JSON.stringify({
             success: true,
             sourceFrame,
             targetFrame,
             cellsCopied,
             cellsSkipped,
-          }) 
+          })
         }],
       };
     }
@@ -376,7 +376,7 @@ export function registerAnimationTools(server: McpServer): void {
     async ({ startFrame, endFrame, steps, method }) => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
+
       if (startFrame < 0 || startFrame >= state.frames.length) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Start frame index out of range' }) }],
@@ -395,24 +395,24 @@ export function registerAnimationTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       const frameA = state.frames[startFrame];
       const frameB = state.frames[endFrame];
-      
+
       // Collect all cell positions from both frames
       const allKeys = new Set([...Object.keys(frameA.data), ...Object.keys(frameB.data)]);
-      
+
       const createdFrames: Array<{ index: number; id: string }> = [];
-      
+
       // Generate intermediate frames
       for (let i = 1; i <= steps; i++) {
         const t = i / (steps + 1); // Progress from 0 to 1
         const newFrameData: CanvasData = {};
-        
+
         for (const key of allKeys) {
           const cellA = frameA.data[key];
           const cellB = frameB.data[key];
-          
+
           if (method === 'linear') {
             // Linear: cell appears/disappears based on threshold
             if (t < 0.5) {
@@ -430,30 +430,30 @@ export function registerAnimationTools(server: McpServer): void {
               if (t < 1 - t) newFrameData[key] = { ...cellA };
             } else if (cellB) {
               // Only in end frame - fade in
-              if (t > t) newFrameData[key] = { ...cellB };
+              if (t > 1 - t) newFrameData[key] = { ...cellB };
             }
           }
         }
-        
+
         // Calculate duration
         const avgDuration = Math.round((frameA.duration + frameB.duration) / 2);
-        
+
         // Insert the new frame
         const insertIndex = Math.max(startFrame, endFrame) + i;
         const newFrame = pm.addFrame(insertIndex, newFrameData, avgDuration, false);
         pm.setFrameName(pm.getState().frames.findIndex(f => f.id === newFrame.id), `Interpolated ${i}/${steps}`, false);
-        
-        createdFrames.push({ 
-          index: pm.getState().frames.findIndex(f => f.id === newFrame.id), 
-          id: newFrame.id 
+
+        createdFrames.push({
+          index: pm.getState().frames.findIndex(f => f.id === newFrame.id),
+          id: newFrame.id
         });
       }
-      
+
       // Broadcast interpolation completed
       broadcastStateChange('interpolate_frames', { framesCreated: createdFrames.length });
       return {
-        content: [{ 
-          type: 'text', 
+        content: [{
+          type: 'text',
           text: JSON.stringify({
             success: true,
             startFrame,
@@ -462,7 +462,7 @@ export function registerAnimationTools(server: McpServer): void {
             framesCreated: createdFrames.length,
             newFrames: createdFrames,
             totalFrames: pm.getState().frames.length,
-          }) 
+          })
         }],
       };
     }
