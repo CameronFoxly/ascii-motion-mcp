@@ -35,12 +35,12 @@ import {
   registerSyncTools,
   setSyncToolsBrowserStateCallback,
   setConnectionToolsBrowserStateCallback,
-  setRequestRequestAuthTokenCallback,
+  setRequestAuthTokenCallback,
   registerLayerTools,
+  registerConnectionTools,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
-import { registerConnectionTools } from './tools/connection.js';
 
 // =============================================================================
 // CLI Argument Parsing
@@ -229,7 +229,7 @@ async function main(): Promise<void> {
     // Wire up the refresh_state_from_browser tool
     setSyncToolsBrowserStateCallback(browserStateCallback);
     setConnectionToolsBrowserStateCallback(browserStateCallback);
-    setRequestRequestAuthTokenCallback(tokenCallback);
+    setRequestAuthTokenCallback(tokenCallback);
 
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);

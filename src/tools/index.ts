@@ -25,5 +25,5 @@ export { registerLayerTools } from './layers.js';
 export {
   registerConnectionTools,
   setRequestBrowserStateCallback as setConnectionToolsBrowserStateCallback,
-  setRequestRequestAuthTokenCallback,
+  setRequestAuthTokenCallback,
 } from './connection.js';
