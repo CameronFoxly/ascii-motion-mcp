@@ -1509,7 +1509,8 @@ export class ProjectStateManager {
         this.state.looping = data.timeline.looping ?? true;
       }
       console.error(`[state] Loaded ${this.state.layers.length} layers from browser`);
-      return;
+      // Don't return early — also load animation.frames below so
+      // preview/export tools that read state.frames get valid data.
     }
     if (data.animation?.frames && data.animation.frames.length > 0) {
       this.state.frames = data.animation.frames.map((frame, index) => ({
