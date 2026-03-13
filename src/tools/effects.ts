@@ -499,7 +499,15 @@ export function registerEffectsTools(server: McpServer): void {
         };
       }
 
-      broadcastStateChange('add_effect_block', { blockId: track.effectBlock.id, ownerId, effectType });
+      broadcastStateChange('add_effect_block', {
+        blockId: track.effectBlock.id,
+        trackId: track.id,
+        ownerId,
+        effectType,
+        startFrame: start,
+        durationFrames: duration,
+        settings: track.effectBlock.settings,
+      });
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({
           success: true,
@@ -600,7 +608,7 @@ export function registerEffectsTools(server: McpServer): void {
         };
       }
 
-      broadcastStateChange('add_effect_keyframe', { blockId, propertyPath, frame });
+      broadcastStateChange('add_effect_keyframe', { blockId, propertyPath, frame, value, keyframeId: kfId });
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ success: true, keyframeId: kfId, blockId, propertyPath, frame, value }) }],
       };

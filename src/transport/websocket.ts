@@ -20,6 +20,24 @@ export interface WebSocketTransportOptions {
  * Server transport for WebSocket: enables real-time bidirectional communication
  * with browser clients for live ASCII Motion synchronization.
  */
+export interface ExportRequest {
+  requestId: string;
+  exportType: 'image' | 'video';
+  format: string;
+  settings: Record<string, unknown>;
+  filename: string;
+}
+
+export interface ExportResult {
+  requestId: string;
+  success: boolean;
+  data?: string;       // base64-encoded file data
+  mimeType?: string;
+  filename?: string;
+  error?: string;
+  bytes?: number;
+}
+
 export class WebSocketServerTransport {
   private wss: WebSocketServer | null = null;
   private httpServer: http.Server | null = null;
@@ -27,6 +45,7 @@ export class WebSocketServerTransport {
   private _sessionId: string;
   private _authToken: string;
   onStateSnapshot?: (snapshot: unknown) => void;
+  private pendingExportResolvers: Map<string, (result: ExportResult) => void> = new Map();
   private options: WebSocketTransportOptions;
   
   onclose?: () => void;
@@ -121,6 +140,16 @@ export class WebSocketServerTransport {
             if (rawMessage.type === 'state_snapshot') {
               console.error('[ws-transport] Received state snapshot from browser');
               this.onStateSnapshot?.(rawMessage);
+              return;
+            }
+            // Handle export_result from browser
+            if (rawMessage.type === 'export_result') {
+              const result = rawMessage as ExportResult;
+              const resolver = this.pendingExportResolvers.get(result.requestId);
+              if (resolver) {
+                this.pendingExportResolvers.delete(result.requestId);
+                resolver(result);
+              }
               return;
             }
             const message = rawMessage as JSONRPCMessage;
@@ -236,6 +265,36 @@ export class WebSocketServerTransport {
   }
 
   /**
+   * Request an export from the browser.
+   * Sends an export_request message and waits for an export_result response.
+   */
+  async requestExportFromBrowser(request: ExportRequest, timeoutMs = 60000): Promise<ExportResult> {
+    if (this.clients.size === 0) {
+      return { requestId: request.requestId, success: false, error: 'No browser connected' };
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.pendingExportResolvers.delete(request.requestId);
+        resolve({ requestId: request.requestId, success: false, error: 'Export timed out' });
+      }, timeoutMs);
+
+      this.pendingExportResolvers.set(request.requestId, (result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      });
+
+      const message = JSON.stringify({ type: 'export_request', ...request });
+      for (const client of this.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(message);
+          break; // Only send to one client
+        }
+      }
+    });
+  }
+
+  /**
    * Close the WebSocket server.
    */
   async close(): Promise<void> {
@@ -317,5 +376,9 @@ export class HybridTransport {
 
   async requestStateFromBrowser(timeoutMs = 5000): Promise<boolean> {
     return this.wsTransport.requestStateFromBrowser(timeoutMs);
+  }
+
+  async requestExportFromBrowser(request: ExportRequest, timeoutMs = 60000): Promise<ExportResult> {
+    return this.wsTransport.requestExportFromBrowser(request, timeoutMs);
   }
 }

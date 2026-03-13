@@ -27,3 +27,7 @@ export {
   setRequestBrowserStateCallback as setConnectionToolsBrowserStateCallback,
   setRequestAuthTokenCallback,
 } from './connection.js';
+export {
+  registerBrowserExportTools,
+  setExportRequestCallback,
+} from './browser-export.js';

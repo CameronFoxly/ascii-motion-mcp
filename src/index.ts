@@ -38,6 +38,8 @@ import {
   setRequestAuthTokenCallback,
   registerLayerTools,
   registerConnectionTools,
+  registerBrowserExportTools,
+  setExportRequestCallback,
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
@@ -186,6 +188,7 @@ async function main(): Promise<void> {
   registerSyncTools(server);
   registerLayerTools(server);
   registerConnectionTools(server);
+  registerBrowserExportTools(server);
 
   // Register resources
   registerResources(server);
@@ -230,6 +233,11 @@ async function main(): Promise<void> {
     setSyncToolsBrowserStateCallback(browserStateCallback);
     setConnectionToolsBrowserStateCallback(browserStateCallback);
     setRequestAuthTokenCallback(tokenCallback);
+
+    // Wire up browser-delegated export tools
+    setExportRequestCallback((request, timeoutMs) => {
+      return hybridTransport!.requestExportFromBrowser(request, timeoutMs);
+    });
 
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
