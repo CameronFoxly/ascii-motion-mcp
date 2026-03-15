@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 import { isInBounds } from '../types.js';
 
 export function registerCanvasTools(server: McpServer): void {
@@ -22,6 +23,7 @@ export function registerCanvasTools(server: McpServer): void {
       frameIndex: z.number().int().optional().describe('Frame index (defaults to current frame)'),
     },
     async ({ x, y, frameIndex }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       

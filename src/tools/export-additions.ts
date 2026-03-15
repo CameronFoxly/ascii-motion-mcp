@@ -8,6 +8,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 import { Frame } from '../types.js';
 
 export function registerAdditionalExportTools(server: McpServer): void {
@@ -24,6 +25,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
       includeAnimation: z.boolean().default(false).describe('Export all frames with animation support'),
     },
     async ({ filePath, frameIndex, componentName, includeAnimation }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 
@@ -82,6 +84,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
       includeAnimation: z.boolean().default(false).describe('Export all frames with animation support'),
     },
     async ({ filePath, frameIndex, packageName, modelName, includeAnimation }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 
@@ -139,6 +142,7 @@ export function registerAdditionalExportTools(server: McpServer): void {
       includeAnimation: z.boolean().default(false).describe('Export all frames with animation support'),
     },
     async ({ filePath, frameIndex, className, includeAnimation }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 

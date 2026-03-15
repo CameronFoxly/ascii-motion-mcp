@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 
 export function registerFrameTools(server: McpServer): void {
   // ==========================================================================
@@ -17,6 +18,7 @@ export function registerFrameTools(server: McpServer): void {
     'List all frames in the animation with their metadata',
     {},
     async () => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       

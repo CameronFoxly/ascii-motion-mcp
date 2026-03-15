@@ -16,7 +16,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { getProjectManager, setWebSocketBroadcaster } from './state.js';
+import { getProjectManager, setWebSocketBroadcaster, setEnsureFreshStateCallback } from './state.js';
 import { HybridTransport } from './transport/index.js';
 import {
   registerCanvasTools,
@@ -233,6 +233,9 @@ async function main(): Promise<void> {
     setSyncToolsBrowserStateCallback(browserStateCallback);
     setConnectionToolsBrowserStateCallback(browserStateCallback);
     setRequestAuthTokenCallback(tokenCallback);
+
+    // Wire up auto-refresh for preview/inspection tools
+    setEnsureFreshStateCallback(browserStateCallback);
 
     // Wire up browser-delegated export tools
     setExportRequestCallback((request, timeoutMs) => {

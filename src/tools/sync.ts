@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey, type Cell } from '../types.js';
 
 // State request callback - will be set by index.ts
@@ -95,6 +96,7 @@ export function registerSyncTools(server: McpServer): void {
       showUnchanged: z.boolean().optional().default(false).describe('Include unchanged cells in output'),
     },
     async ({ frameA, frameB, showUnchanged }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 
