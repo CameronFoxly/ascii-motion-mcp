@@ -17,6 +17,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey } from '../types.js';
 
 export function registerExportTools(server: McpServer): void {
@@ -34,6 +35,7 @@ export function registerExportTools(server: McpServer): void {
       includeMetadata: z.boolean().default(false).describe('Include frame names and timing as comments'),
     },
     async ({ filePath, frameIndex, allFrames, trimEmpty, includeMetadata }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -122,6 +124,7 @@ export function registerExportTools(server: McpServer): void {
       includeEmptyCells: z.boolean().default(false).describe('Include cells with default values'),
     },
     async ({ filePath, includeMetadata, humanReadable, includeEmptyCells }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -219,6 +222,7 @@ export function registerExportTools(server: McpServer): void {
       filePath: z.string().describe('File path for the .asciimtn file (relative to project dir)'),
     },
     async ({ filePath }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -301,6 +305,7 @@ export function registerExportTools(server: McpServer): void {
       includeControls: z.boolean().default(true).describe('Include play/pause controls'),
     },
     async ({ filePath, backgroundColor, fontFamily, fontSize, animationSpeed, loops, includeControls }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -377,6 +382,7 @@ export function registerExportTools(server: McpServer): void {
       componentName: z.string().default('AsciiAnimation').describe('React component name'),
     },
     async ({ filePath, typescript, includeControls, componentName }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -439,6 +445,7 @@ export function registerExportTools(server: McpServer): void {
       colorMode: z.enum(['16', '256', 'truecolor']).default('truecolor').describe('ANSI color mode'),
     },
     async ({ frameIndex, colorMode }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       

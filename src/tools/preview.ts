@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
+import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey, type Cell } from '../types.js';
 
 // Region schema with optional fields to handle partial inputs from MCP Inspector
@@ -29,6 +30,7 @@ export function registerPreviewTools(server: McpServer): void {
       frameIndex: z.number().int().optional().describe('Frame index (defaults to current)'),
     },
     async ({ frameIndex }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -107,6 +109,7 @@ export function registerPreviewTools(server: McpServer): void {
       maxCells: z.number().int().min(1).max(1000).default(100).describe('Maximum cells to return'),
     },
     async ({ frameIndex, region, maxCells }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -169,6 +172,7 @@ export function registerPreviewTools(server: McpServer): void {
       overlayPreviousFrame: z.boolean().default(false).describe('Show previous frame content as dim (for motion context)'),
     },
     async ({ frameIndex, region, trimEmpty, overlayPreviousFrame }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -276,6 +280,7 @@ export function registerPreviewTools(server: McpServer): void {
       maxCells: z.number().int().min(1).max(500).default(100).describe('Maximum cells to return'),
     },
     async ({ frameA, frameB, maxCells }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -343,6 +348,7 @@ export function registerPreviewTools(server: McpServer): void {
     'Get a high-level description of the animation: frame count, timing, and motion patterns.',
     {},
     async () => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       

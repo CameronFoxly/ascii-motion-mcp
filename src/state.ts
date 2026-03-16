@@ -1474,7 +1474,10 @@ export class ProjectStateManager {
   
   loadFromBrowserSnapshot(snapshot: unknown): void {
     const data = snapshot as {
-      canvas?: { width: number; height: number; backgroundColor?: string };
+      canvas?: {
+        width: number; height: number; backgroundColor?: string;
+        cells?: Record<string, { char: string; color: string; bgColor: string }>;
+      };
       animation?: {
         frames: Array<{
           id: string; name: string; duration: number;
@@ -1522,6 +1525,17 @@ export class ProjectStateManager {
       this.state.currentFrameIndex = Math.min(data.animation.currentFrameIndex ?? 0, this.state.frames.length - 1);
       console.error(`[state] Loaded ${this.state.frames.length} frames from browser`);
     }
+
+    // Ingest canvas.cells from the snapshot (companion PR #94).
+    // The browser sends the current frame's live cell data in canvas.cells.
+    // Merge it into the current frame so preview/export tools see fresh data.
+    if (data.canvas?.cells && Object.keys(data.canvas.cells).length > 0) {
+      const idx = this.state.currentFrameIndex;
+      if (this.state.frames[idx]) {
+        this.state.frames[idx].data = data.canvas.cells;
+        console.error(`[state] Ingested ${Object.keys(data.canvas.cells).length} cells from canvas.cells into frame ${idx}`);
+      }
+    }
   }
 
   setFilePath(path: string): void { this.state.filePath = path; }
@@ -1556,4 +1570,38 @@ export function setWebSocketBroadcaster(broadcaster: BroadcasterFn): void {
 
 export function broadcastStateChange(type: string, data: unknown): void {
   if (wsBroadcaster) wsBroadcaster(type, data);
+}
+
+// ============================================================================
+// Browser State Refresh
+// ============================================================================
+
+type FreshStateCallback = () => Promise<boolean>;
+let freshStateCallback: FreshStateCallback | null = null;
+
+/**
+ * Register the callback that triggers a state_request → state_snapshot
+ * round-trip with the connected browser. Called from index.ts during
+ * live-mode setup.
+ */
+export function setEnsureFreshStateCallback(callback: FreshStateCallback): void {
+  freshStateCallback = callback;
+}
+
+/**
+ * Ensure the server's in-memory ProjectState reflects the browser's
+ * latest canvas data. Sends state_request to the browser and waits for
+ * the state_snapshot response. No-op when live mode is not enabled or
+ * no browser is connected.
+ *
+ * Call this at the top of any tool handler that reads frame/cell data
+ * from ProjectState.
+ */
+export async function ensureFreshBrowserState(): Promise<void> {
+  if (!freshStateCallback) return;
+  try {
+    await freshStateCallback();
+  } catch {
+    // Silently ignore — tool will read whatever state is available
+  }
 }
