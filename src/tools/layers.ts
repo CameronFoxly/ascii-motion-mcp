@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager, broadcastStateChange } from '../state.js';
+import { getProjectManager, broadcastStateChange, ensureFreshBrowserState } from '../state.js';
 import {
   EasingCurveSchema,
   PropertyPathSchema,
@@ -24,6 +24,7 @@ export function registerLayerTools(server: McpServer): void {
     'Get all layers in the project with their metadata, content frame count, and property track info.',
     {},
     async () => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 
@@ -82,7 +83,7 @@ export function registerLayerTools(server: McpServer): void {
       const layer = pm.addLayer(name);
 
       broadcastStateChange('add_layer', {
-        layer: { id: layer.id, name: layer.name },
+        layer,
         totalLayers: pm.getState().layers.length,
       });
 
@@ -152,7 +153,7 @@ export function registerLayerTools(server: McpServer): void {
 
       broadcastStateChange('duplicate_layer', {
         sourceLayerId: layerId,
-        newLayer: { id: newLayer.id, name: newLayer.name },
+        newLayer,
       });
 
       return {
@@ -431,6 +432,7 @@ export function registerLayerTools(server: McpServer): void {
       layerId: z.string().describe('Layer ID'),
     },
     async ({ layerId }) => {
+      await ensureFreshBrowserState();
       const pm = getProjectManager();
       const properties = pm.getLayerProperties(layerId);
 

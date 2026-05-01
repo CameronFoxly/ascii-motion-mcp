@@ -283,6 +283,8 @@ export function registerProjectTools(server: McpServer): void {
       (pm as unknown as { state: { name: string; isDirty: boolean } }).state.name = name;
       (pm as unknown as { state: { isDirty: boolean } }).state.isDirty = true;
       
+      broadcastStateChange('set_project_name', { name });
+      
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, name }) }],
       };
