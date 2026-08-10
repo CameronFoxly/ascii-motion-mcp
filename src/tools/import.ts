@@ -10,8 +10,44 @@ import { z } from 'zod';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager, broadcastStateChange } from '../state.js';
-import { applyExactCellChanges, requireFreshBrowserState } from '../live-sync.js';
+import { getProjectManager } from '../state.js';
+import {
+  applyExactCellChanges,
+  requireFreshBrowserState,
+  type ExactCellChange,
+} from '../live-sync.js';
+
+interface ImagePixel {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+interface DecodedImage {
+  backend: 'sharp' | 'jimp';
+  sourceDimensions: { width?: number; height?: number };
+  width: number;
+  height: number;
+  getPixel: (x: number, y: number) => ImagePixel;
+}
+
+interface ImageCellOptions {
+  charset: string;
+  colorMode: 'none' | 'foreground' | 'background' | 'both';
+  dithering: 'none' | 'floyd-steinberg' | 'ordered';
+  offsetX: number;
+  offsetY: number;
+  canvasWidth: number;
+  canvasHeight: number;
+}
+
+const BAYER_MATRIX = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
 
 export function registerImportTools(server: McpServer): void {
   // ==========================================================================
@@ -33,7 +69,6 @@ export function registerImportTools(server: McpServer): void {
     },
     async ({ filePath, targetWidth, targetHeight, charset, colorMode, dithering, frameIndex, offsetX, offsetY }) => {
       const pm = getProjectManager();
-      const state = pm.getState();
 
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
@@ -48,211 +83,89 @@ export function registerImportTools(server: McpServer): void {
         };
       }
 
-      // Determine target dimensions
-      const width = targetWidth ?? state.width;
-      const height = targetHeight ?? Math.floor(width / 2); // Approximate aspect ratio for terminal chars
-
       try {
-        // Try to use sharp for image processing
-        // @ts-expect-error - optional dependency
-        const sharp = await import('sharp');
-
-        // Read and resize image
-        const image = sharp.default(fullPath);
-        const metadata = await image.metadata();
-
-        // Resize to target dimensions
-        const resized = await image
-          .resize(width, height, { fit: 'fill' })
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-
-        const { data, info } = resized;
-        const channels = info.channels;
-
-        // Convert to ASCII
-        const frameIdx = frameIndex ?? state.currentFrameIndex;
-        const frame = state.frames[frameIdx];
-        if (!frame) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid frame index' }) }],
-            isError: true,
-          };
-        }
-
-        const cellsToSet: Array<{ x: number; y: number; char: string; color: string; bgColor: string }> = [];
-
-        for (let y = 0; y < info.height; y++) {
-          for (let x = 0; x < info.width; x++) {
-            const idx = (y * info.width + x) * channels;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const a = channels === 4 ? data[idx + 3] : 255;
-
-            // Skip transparent pixels
-            if (a < 128) continue;
-
-            // Calculate brightness (0-1)
-            let brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-            // Apply dithering if requested
-            if (dithering === 'ordered') {
-              // 4x4 Bayer matrix dithering
-              const bayerMatrix = [
-                [0, 8, 2, 10],
-                [12, 4, 14, 6],
-                [3, 11, 1, 9],
-                [15, 7, 13, 5],
-              ];
-              const threshold = bayerMatrix[y % 4][x % 4] / 16;
-              brightness = brightness + (threshold - 0.5) * 0.2;
-              brightness = Math.max(0, Math.min(1, brightness));
-            }
-
-            // Map brightness to character
-            const charIndex = Math.floor(brightness * (charset.length - 1));
-            const char = charset[charIndex];
-
-            // Determine colors
-            const hexColor = rgbToHex(r, g, b);
-            let fgColor = '#ffffff';
-            let bgColor = 'transparent';
-
-            if (colorMode === 'foreground' || colorMode === 'both') {
-              fgColor = hexColor;
-            }
-            if (colorMode === 'background' || colorMode === 'both') {
-              bgColor = hexColor;
-            }
-
-            const canvasX = x + offsetX;
-            const canvasY = y + offsetY;
-
-            if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
-              cellsToSet.push({
-                x: canvasX,
-                y: canvasY,
-                char,
-                color: fgColor,
-                bgColor,
-              });
-            }
-          }
-        }
-
-        // Apply Floyd-Steinberg dithering post-process if requested
-        // (This is a simplified version - true F-S would need error diffusion during processing)
-
-        // Set all cells
-        for (const cell of cellsToSet) {
-          pm.setCell(cell.x, cell.y, { char: cell.char, color: cell.color, bgColor: cell.bgColor });
-        }
-
-          // Broadcast import completed
-          broadcastStateChange('import_image', { cellsCreated: cellsToSet.length });
+        await requireFreshBrowserState();
+      } catch (error) {
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              success: true,
-              sourceFile: fullPath,
-              sourceDimensions: { width: metadata.width, height: metadata.height },
-              targetDimensions: { width: info.width, height: info.height },
-              cellsCreated: cellsToSet.length,
-              colorMode,
-              charset,
-            })
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
           }],
+          isError: true,
         };
-      } catch (_e) {
-        // Fall back to jimp if sharp is not available
-        try {
-          // @ts-expect-error - optional dependency
-          const Jimp = (await import('jimp')).default;
-
-          const image = await Jimp.read(fullPath);
-
-          // Resize to target dimensions
-          image.resize(width, height);
-
-          const cellsToSet: Array<{ x: number; y: number; char: string; color: string; bgColor: string }> = [];
-
-          for (let y = 0; y < image.getHeight(); y++) {
-            for (let x = 0; x < image.getWidth(); x++) {
-              const pixelColor = image.getPixelColor(x, y);
-              const { r, g, b, a } = Jimp.intToRGBA(pixelColor);
-
-              // Skip transparent pixels
-              if (a < 128) continue;
-
-              // Calculate brightness
-              const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-              // Map brightness to character
-              const charIndex = Math.floor(brightness * (charset.length - 1));
-              const char = charset[charIndex];
-
-              // Determine colors
-              const hexColor = rgbToHex(r, g, b);
-              let fgColor = '#ffffff';
-              let bgColor = 'transparent';
-
-              if (colorMode === 'foreground' || colorMode === 'both') {
-                fgColor = hexColor;
-              }
-              if (colorMode === 'background' || colorMode === 'both') {
-                bgColor = hexColor;
-              }
-
-              const canvasX = x + offsetX;
-              const canvasY = y + offsetY;
-
-              if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
-                cellsToSet.push({
-                  x: canvasX,
-                  y: canvasY,
-                  char,
-                  color: fgColor,
-                  bgColor,
-                });
-              }
-            }
-          }
-
-          // Set all cells
-          for (const cell of cellsToSet) {
-            pm.setCell(cell.x, cell.y, { char: cell.char, color: cell.color, bgColor: cell.bgColor });
-          }
-
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                sourceFile: fullPath,
-                targetDimensions: { width, height },
-                cellsCreated: cellsToSet.length,
-                colorMode,
-                charset,
-                note: 'Used jimp for image processing',
-              })
-            }],
-          };
-        } catch (_e2) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                error: 'Image import requires either "sharp" or "jimp" npm package.',
-                installCommand: 'npm install sharp  # or: npm install jimp',
-                alternativeHint: 'You can also manually convert images using an external tool and paste the ASCII text using paste_ascii_block.',
-              })
-            }],
-            isError: true,
-          };
-        }
       }
+
+      const state = pm.getState();
+      const width = targetWidth ?? state.width;
+      const height = targetHeight ?? Math.floor(width / 2);
+
+      let decoded: DecodedImage;
+      try {
+        decoded = await decodeImage(fullPath, width, height);
+      } catch {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Image import requires either "sharp" or "jimp" npm package.',
+              installCommand: 'npm install sharp  # or: npm install jimp',
+              alternativeHint: 'You can also manually convert images using an external tool and paste the ASCII text using paste_ascii_block.',
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      const cells = buildImageCells(decoded, {
+        charset,
+        colorMode,
+        dithering,
+        offsetX,
+        offsetY,
+        canvasWidth: state.width,
+        canvasHeight: state.height,
+      });
+
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          frameIndex,
+          cells,
+        });
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            browserSynced: applied.browserSynced,
+            sourceFile: fullPath,
+            sourceDimensions: decoded.sourceDimensions,
+            targetDimensions: { width: decoded.width, height: decoded.height },
+            frameIndex: applied.frameIndex,
+            cellsCreated: applied.cellsChanged,
+            colorMode,
+            charset,
+            ...(decoded.backend === 'jimp' ? { note: 'Used jimp for image processing' } : {}),
+          }),
+        }],
+      };
     }
   );
 
@@ -447,6 +360,109 @@ export function registerImportTools(server: McpServer): void {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+async function decodeImage(fullPath: string, width: number, height: number): Promise<DecodedImage> {
+  try {
+    return await decodeWithSharp(fullPath, width, height);
+  } catch {
+    return decodeWithJimp(fullPath, width, height);
+  }
+}
+
+async function decodeWithSharp(fullPath: string, width: number, height: number): Promise<DecodedImage> {
+  // @ts-expect-error - optional dependency
+  const sharp = await import('sharp');
+  const image = sharp.default(fullPath);
+  const metadata = await image.metadata();
+  const { data, info } = await image
+    .resize(width, height, { fit: 'fill' })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const channels = info.channels;
+
+  return {
+    backend: 'sharp',
+    sourceDimensions: { width: metadata.width, height: metadata.height },
+    width: info.width,
+    height: info.height,
+    getPixel(x, y) {
+      const index = (y * info.width + x) * channels;
+      return {
+        r: data[index],
+        g: data[index + 1],
+        b: data[index + 2],
+        a: channels === 4 ? data[index + 3] : 255,
+      };
+    },
+  };
+}
+
+async function decodeWithJimp(fullPath: string, width: number, height: number): Promise<DecodedImage> {
+  // @ts-expect-error - optional dependency
+  const Jimp = (await import('jimp')).default;
+  const image = await Jimp.read(fullPath);
+  const sourceDimensions = {
+    width: image.getWidth(),
+    height: image.getHeight(),
+  };
+  image.resize(width, height);
+
+  return {
+    backend: 'jimp',
+    sourceDimensions,
+    width: image.getWidth(),
+    height: image.getHeight(),
+    getPixel(x, y) {
+      return Jimp.intToRGBA(image.getPixelColor(x, y));
+    },
+  };
+}
+
+function buildImageCells(image: DecodedImage, options: ImageCellOptions): ExactCellChange[] {
+  const cells: ExactCellChange[] = [];
+
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      const { r, g, b, a } = image.getPixel(x, y);
+      if (a < 128) continue;
+
+      let brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      if (options.dithering === 'ordered') {
+        const threshold = BAYER_MATRIX[y % 4][x % 4] / 16;
+        brightness = Math.max(0, Math.min(1, brightness + (threshold - 0.5) * 0.2));
+      }
+
+      const charIndex = Math.floor(brightness * (options.charset.length - 1));
+      const hexColor = rgbToHex(r, g, b);
+      const canvasX = x + options.offsetX;
+      const canvasY = y + options.offsetY;
+      if (
+        canvasX < 0
+        || canvasX >= options.canvasWidth
+        || canvasY < 0
+        || canvasY >= options.canvasHeight
+      ) {
+        continue;
+      }
+
+      cells.push({
+        x: canvasX,
+        y: canvasY,
+        cell: {
+          char: options.charset[charIndex],
+          color: options.colorMode === 'foreground' || options.colorMode === 'both'
+            ? hexColor
+            : '#ffffff',
+          bgColor: options.colorMode === 'background' || options.colorMode === 'both'
+            ? hexColor
+            : 'transparent',
+        },
+      });
+    }
+  }
+
+  return cells;
+}
 
 function rgbToHex(r: number, g: number, b: number): string {
   return '#' + [r, g, b].map(x => {
