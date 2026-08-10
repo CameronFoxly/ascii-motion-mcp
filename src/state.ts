@@ -296,61 +296,106 @@ export class ProjectStateManager {
   }
   
   setCells(cells: Array<{ x: number; y: number; cell: Cell }>, recordHistory = true): number {
+    let dataTarget: CanvasData | undefined;
+    let description = `Set ${cells.length} cells`;
+
     if (this.isLayerMode()) {
       const layer = this.getActiveLayer();
       if (!layer || layer.locked) return 0;
       const cf = this.getActiveContentFrame();
       if (!cf) return 0;
-      const previousData = { ...cf.data };
-      let count = 0;
-      for (const { x, y, cell } of cells) {
-        if (!isInBounds(x, y, this.state.width, this.state.height)) continue;
-        const key = createCellKey(x, y);
-        const isEmpty = cell.char === ' ' && cell.color === '#FFFFFF' && cell.bgColor === 'transparent';
-        if (isEmpty) delete cf.data[key]; else cf.data[key] = { ...cell };
-        count++;
-      }
-      if (recordHistory && count > 0) {
-        const newData = { ...cf.data };
-        this.pushHistory({
-          type: 'set_cells_batch',
-          description: `Set ${count} cells on layer "${layer.name}"`,
-          timestamp: Date.now(),
-          undo: () => { Object.keys(cf.data).forEach(k => delete cf.data[k]); Object.assign(cf.data, previousData); },
-          redo: () => { Object.keys(cf.data).forEach(k => delete cf.data[k]); Object.assign(cf.data, newData); },
-        });
-      }
-      if (count > 0) this.state.isDirty = true;
-      return count;
+      dataTarget = cf.data;
+      description = `Set ${cells.length} cells on layer "${layer.name}"`;
+    } else {
+      dataTarget = this.getCurrentFrame().data;
     }
 
-    // Legacy mode
-    const frame = this.getCurrentFrame();
-    const previousData = { ...frame.data };
+    return this.setCellsInData(dataTarget, cells, description, recordHistory);
+  }
+
+  /**
+   * Apply exact cells to an explicit frame without changing the current frame.
+   * In layer mode, frameIndex addresses a timeline frame on the active layer.
+   */
+  setCellsOnFrame(
+    frameIndex: number,
+    cells: Array<{ x: number; y: number; cell: Cell }>,
+    recordHistory = true,
+  ): number {
+    let dataTarget: CanvasData | undefined;
+    let description = `Set ${cells.length} cells on frame ${frameIndex}`;
+
+    if (this.isLayerMode()) {
+      const layer = this.getActiveLayer();
+      if (!layer || layer.locked) return 0;
+      const contentFrame = this.getContentFrameAtTime(layer, frameIndex);
+      if (!contentFrame) return 0;
+      dataTarget = contentFrame.data;
+      description = `Set ${cells.length} cells on frame ${frameIndex} of layer "${layer.name}"`;
+    } else {
+      const frame = this.state.frames[frameIndex];
+      if (!frame) return 0;
+      dataTarget = frame.data;
+    }
+
+    return this.setCellsInData(dataTarget, cells, description, recordHistory);
+  }
+
+  setCellsAtTimelineFrame(
+    frameIndex: number,
+    cells: Array<{ x: number; y: number; cell: Cell }>,
+    recordHistory = true,
+  ): number {
+    return this.setCellsOnFrame(frameIndex, cells, recordHistory);
+  }
+
+  hasCellFrame(frameIndex: number): boolean {
+    if (this.isLayerMode()) {
+      const layer = this.getActiveLayer();
+      return frameIndex >= 0
+        && frameIndex < this.state.timelineConfig.durationFrames
+        && Boolean(layer && this.getContentFrameAtTime(layer, frameIndex));
+    }
+    return Boolean(this.state.frames[frameIndex]);
+  }
+
+  private setCellsInData(
+    dataTarget: CanvasData,
+    cells: Array<{ x: number; y: number; cell: Cell }>,
+    description: string,
+    recordHistory: boolean,
+  ): number {
+    const previousData = { ...dataTarget };
     let count = 0;
-    
+
     for (const { x, y, cell } of cells) {
       if (!isInBounds(x, y, this.state.width, this.state.height)) continue;
       const key = createCellKey(x, y);
       if (cell.char === ' ' && cell.color === '#FFFFFF' && cell.bgColor === 'transparent') {
-        delete frame.data[key];
+        delete dataTarget[key];
       } else {
-        frame.data[key] = { ...cell };
+        dataTarget[key] = { ...cell };
       }
       count++;
     }
-    
+
     if (recordHistory && count > 0) {
-      const newData = { ...frame.data };
+      const newData = { ...dataTarget };
       this.pushHistory({
         type: 'set_cells_batch',
-        description: `Set ${count} cells`,
+        description,
         timestamp: Date.now(),
-        undo: () => { frame.data = previousData; },
-        redo: () => { frame.data = newData; },
+        undo: () => {
+          Object.keys(dataTarget).forEach(key => delete dataTarget[key]);
+          Object.assign(dataTarget, previousData);
+        },
+        redo: () => {
+          Object.keys(dataTarget).forEach(key => delete dataTarget[key]);
+          Object.assign(dataTarget, newData);
+        },
       });
     }
-    
+
     if (count > 0) this.state.isDirty = true;
     return count;
   }
@@ -444,8 +489,8 @@ export class ProjectStateManager {
   // ==========================================================================
   // Fill Operations
   // ==========================================================================
-  
-  fillRegion(
+
+  planFillRegion(
     startX: number,
     startY: number,
     fillCell: Cell,
@@ -455,26 +500,25 @@ export class ProjectStateManager {
       matchColor?: boolean;
       matchBgColor?: boolean;
     } = {},
-    recordHistory = true
-  ): number {
+  ): Array<{ x: number; y: number; cell: Cell }> {
     const {
       contiguous = true,
       matchChar = false,
       matchColor = false,
       matchBgColor = false,
     } = options;
-    
+
     const targetCell = this.getCell(startX, startY);
-    
+
     const matches = (cell: Cell): boolean => {
       if (matchChar && cell.char !== targetCell.char) return false;
       if (matchColor && cell.color !== targetCell.color) return false;
       if (matchBgColor && cell.bgColor !== targetCell.bgColor) return false;
       return true;
     };
-    
-    const cellsToFill: Set<string> = new Set();
-    
+
+    const cellsToFill = new Set<string>();
+
     if (contiguous) {
       const visited = new Set<string>();
       const queue: Array<{ x: number; y: number }> = [{ x: startX, y: startY }];
@@ -496,6 +540,27 @@ export class ProjectStateManager {
         }
       }
     }
+
+    return Array.from(cellsToFill, key => {
+      const { x, y } = parseCellKey(key);
+      return { x, y, cell: { ...fillCell } };
+    });
+  }
+
+  fillRegion(
+    startX: number,
+    startY: number,
+    fillCell: Cell,
+    options: {
+      contiguous?: boolean;
+      matchChar?: boolean;
+      matchColor?: boolean;
+      matchBgColor?: boolean;
+    } = {},
+    recordHistory = true
+  ): number {
+    const changes = this.planFillRegion(startX, startY, fillCell, options);
+    const cellsToFill = new Set(changes.map(({ x, y }) => createCellKey(x, y)));
     
     // Get the data target (layer content frame or legacy frame)
     const dataTarget = this.isLayerMode() ? this.getActiveContentFrame()?.data : this.getCurrentFrame().data;
@@ -617,11 +682,69 @@ export class ProjectStateManager {
     return true;
   }
   
-  setFrameDuration(index: number, duration: number, recordHistory = true): boolean {
+  setFrameDuration(
+    index: number,
+    duration: number,
+    recordHistory = true,
+    clampRequestedDuration = true,
+  ): boolean {
     if (index < 0 || index >= this.state.frames.length) return false;
-    duration = Math.max(10, Math.min(60000, duration));
+    if (!Number.isFinite(duration) || duration <= 0) return false;
+    if (clampRequestedDuration) {
+      duration = Math.max(10, Math.min(60000, duration));
+    }
     const frame = this.state.frames[index];
     const previousDuration = frame.duration;
+
+    if (this.isLayerMode()) {
+      const layer = this.getActiveLayer();
+      const contentFrame = layer?.contentFrames[index];
+      if (!layer || !contentFrame) return false;
+
+      const previousContentFrames = layer.contentFrames.map(item => ({
+        item,
+        startFrame: item.startFrame,
+        durationFrames: item.durationFrames,
+      }));
+      const previousTimelineDuration = this.state.timelineConfig.durationFrames;
+      const frameDurationMs = 1000 / this.state.timelineConfig.frameRate;
+      const nextDurationFrames = Math.max(1, Math.round(duration / frameDurationMs));
+      const frameDelta = nextDurationFrames - contentFrame.durationFrames;
+
+      const applyDuration = (): void => {
+        const originalStart = contentFrame.startFrame;
+        contentFrame.durationFrames = nextDurationFrames;
+        for (const item of layer.contentFrames) {
+          if (item !== contentFrame && item.startFrame > originalStart) {
+            item.startFrame += frameDelta;
+          }
+        }
+        this.state.timelineConfig.durationFrames = Math.max(1, previousTimelineDuration + frameDelta);
+        frame.duration = duration;
+      };
+
+      if (recordHistory) {
+        this.pushHistory({
+          type: 'set_frame_duration',
+          description: `Set frame ${index} duration to ${duration}ms`,
+          timestamp: Date.now(),
+          undo: () => {
+            for (const previous of previousContentFrames) {
+              previous.item.startFrame = previous.startFrame;
+              previous.item.durationFrames = previous.durationFrames;
+            }
+            this.state.timelineConfig.durationFrames = previousTimelineDuration;
+            frame.duration = previousDuration;
+          },
+          redo: applyDuration,
+        });
+      }
+
+      applyDuration();
+      this.state.isDirty = true;
+      return true;
+    }
+
     if (recordHistory) {
       this.pushHistory({
         type: 'set_frame_duration',
@@ -1219,6 +1342,15 @@ export class ProjectStateManager {
   setFrameRate(fps: number): void {
     this.state.timelineConfig.frameRate = Math.max(1, Math.min(120, fps));
     this.state.frameRate = this.state.timelineConfig.frameRate;
+    if (this.isLayerMode()) {
+      const activeLayer = this.getActiveLayer();
+      const frameDurationMs = 1000 / this.state.timelineConfig.frameRate;
+      activeLayer?.contentFrames.forEach((contentFrame, index) => {
+        if (this.state.frames[index]) {
+          this.state.frames[index].duration = contentFrame.durationFrames * frameDurationMs;
+        }
+      });
+    }
     this.state.isDirty = true;
   }
 
@@ -1376,6 +1508,7 @@ export class ProjectStateManager {
           easing: kf.easing,
         })),
       })),
+      effectTracks: l.effectTracks,
       staticProperties: l.staticProperties,
     }));
     this.state.layerGroups = (validated.layerGroups ?? []).map(g => ({
@@ -1392,9 +1525,20 @@ export class ProjectStateManager {
         loopKeyframes: pt.loopKeyframes ?? false,
         keyframes: pt.keyframes.map(kf => ({ id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
       })) ?? undefined,
+      effectTracks: g.effectTracks,
       staticProperties: g.staticProperties,
     }));
+    this.state.globalEffects = validated.globalEffects ?? [];
     this.state.activeLayerId = this.state.layers[0]?.id ?? null;
+    const activeLayer = this.state.layers[0];
+    const frameDurationMs = 1000 / this.state.timelineConfig.frameRate;
+    this.state.frames = activeLayer?.contentFrames.map((contentFrame, index) => ({
+      id: contentFrame.id,
+      name: contentFrame.name || `Frame ${index + 1}`,
+      duration: contentFrame.durationFrames * frameDurationMs,
+      data: contentFrame.data,
+    })) ?? [];
+    if (this.state.frames.length === 0) this.state.frames = [createDefaultFrame()];
     this.state.currentFrameIndex = 0;
     if (validated.tools) this.state.toolState = { ...this.state.toolState, ...validated.tools };
     if (validated.typography) this.state.typography = { ...this.state.typography, ...validated.typography };
@@ -1403,13 +1547,19 @@ export class ProjectStateManager {
     this.state.isDirty = false;
   }
 
-  loadSessionAuto(data: unknown, filePath?: string): void {
+  loadFromUnknownSessionData(data: unknown, filePath?: string): void {
     const version = detectSessionVersion(data);
     if (version === '2.0.0') {
       this.loadFromSessionDataV2(data as SessionDataV2, filePath);
-    } else {
+    } else if (version === '1.0.0') {
       this.loadFromSessionData(data as SessionData, filePath);
+    } else {
+      throw new Error('Unknown or unsupported session file format');
     }
+  }
+
+  loadSessionAuto(data: unknown, filePath?: string): void {
+    this.loadFromUnknownSessionData(data, filePath);
   }
   
   toSessionData(): SessionData {
@@ -1456,13 +1606,15 @@ export class ProjectStateManager {
           id: pt.id, propertyPath: pt.propertyPath, loopKeyframes: pt.loopKeyframes,
           keyframes: pt.keyframes.map(kf => ({ id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
         })),
+        effectTracks: l.effectTracks,
         staticProperties: l.staticProperties,
       })),
       layerGroups: this.state.layerGroups.map(g => ({
         id: g.id, name: g.name, childLayerIds: g.childLayerIds,
         visible: g.visible, solo: g.solo, locked: g.locked, collapsed: g.collapsed,
-        propertyTracks: g.propertyTracks, staticProperties: g.staticProperties,
+        propertyTracks: g.propertyTracks, effectTracks: g.effectTracks, staticProperties: g.staticProperties,
       })),
+      globalEffects: this.state.globalEffects,
       tools: this.state.toolState,
       typography: this.state.typography,
     };
@@ -1484,6 +1636,8 @@ export class ProjectStateManager {
           data: Record<string, { char: string; color: string; bgColor: string }>;
         }>;
         currentFrameIndex: number;
+        frameRate?: number;
+        looping?: boolean;
       };
       project?: { name: string };
       layers?: MCPLayer[];
@@ -1522,19 +1676,37 @@ export class ProjectStateManager {
         duration: frame.duration || 100,
         data: frame.data || {},
       }));
-      this.state.currentFrameIndex = Math.min(data.animation.currentFrameIndex ?? 0, this.state.frames.length - 1);
+      const maxFrameIndex = this.isLayerMode()
+        ? this.state.timelineConfig.durationFrames - 1
+        : this.state.frames.length - 1;
+      this.state.currentFrameIndex = Math.min(data.animation.currentFrameIndex ?? 0, maxFrameIndex);
+      if (data.animation.frameRate !== undefined) {
+        this.state.frameRate = data.animation.frameRate;
+        if (!data.timeline) this.state.timelineConfig.frameRate = data.animation.frameRate;
+      }
+      if (data.animation.looping !== undefined) this.state.looping = data.animation.looping;
       console.error(`[state] Loaded ${this.state.frames.length} frames from browser`);
     }
 
     // Ingest canvas.cells from the snapshot (companion PR #94).
     // The browser sends the current frame's live cell data in canvas.cells.
     // Merge it into the current frame so preview/export tools see fresh data.
-    if (data.canvas?.cells && Object.keys(data.canvas.cells).length > 0) {
-      const idx = this.state.currentFrameIndex;
-      if (this.state.frames[idx]) {
-        this.state.frames[idx].data = data.canvas.cells;
-        console.error(`[state] Ingested ${Object.keys(data.canvas.cells).length} cells from canvas.cells into frame ${idx}`);
+    if (data.canvas?.cells) {
+      if (this.isLayerMode()) {
+        const layer = this.getActiveLayer();
+        const contentFrame = layer && this.getContentFrameAtTime(layer, this.state.currentFrameIndex);
+        if (layer && contentFrame) {
+          contentFrame.data = data.canvas.cells;
+          const contentFrameIndex = layer.contentFrames.indexOf(contentFrame);
+          if (this.state.frames[contentFrameIndex]) {
+            this.state.frames[contentFrameIndex].data = data.canvas.cells;
+          }
+        }
+      } else {
+        const idx = this.state.currentFrameIndex;
+        if (this.state.frames[idx]) this.state.frames[idx].data = data.canvas.cells;
       }
+      console.error(`[state] Ingested ${Object.keys(data.canvas.cells).length} cells from canvas.cells`);
     }
   }
 
@@ -1584,7 +1756,7 @@ let freshStateCallback: FreshStateCallback | null = null;
  * round-trip with the connected browser. Called from index.ts during
  * live-mode setup.
  */
-export function setEnsureFreshStateCallback(callback: FreshStateCallback): void {
+export function setEnsureFreshStateCallback(callback: FreshStateCallback | null): void {
   freshStateCallback = callback;
 }
 
@@ -1597,11 +1769,7 @@ export function setEnsureFreshStateCallback(callback: FreshStateCallback): void 
  * Call this at the top of any tool handler that reads frame/cell data
  * from ProjectState.
  */
-export async function ensureFreshBrowserState(): Promise<void> {
-  if (!freshStateCallback) return;
-  try {
-    await freshStateCallback();
-  } catch {
-    // Silently ignore — tool will read whatever state is available
-  }
+export async function ensureFreshBrowserState(): Promise<boolean> {
+  if (!freshStateCallback) return false;
+  return freshStateCallback();
 }

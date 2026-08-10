@@ -11,6 +11,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
+import { applyExactCellChanges, requireFreshBrowserState } from '../live-sync.js';
 
 export function registerImportTools(server: McpServer): void {
   // ==========================================================================
@@ -340,9 +341,8 @@ export function registerImportTools(server: McpServer): void {
       bgColor: z.string().default('transparent').describe('Background color for imported text'),
       replaceSpaces: z.boolean().default(false).describe('Whether to set cells for space characters'),
     },
-    async ({ filePath, frameIndex: _frameIndex, offsetX, offsetY, color, bgColor, replaceSpaces }) => {
+    async ({ filePath, frameIndex, offsetX, offsetY, color, bgColor, replaceSpaces }) => {
       const pm = getProjectManager();
-      const state = pm.getState();
 
       const projectDir = process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
       const fullPath = path.resolve(projectDir, filePath);
@@ -366,8 +366,24 @@ export function registerImportTools(server: McpServer): void {
         };
       }
 
+      try {
+        await requireFreshBrowserState();
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      const state = pm.getState();
       const lines = content.split('\n');
-      let cellsSet = 0;
+      const cells = [];
 
       for (let y = 0; y < lines.length; y++) {
         const line = lines[y];
@@ -381,22 +397,45 @@ export function registerImportTools(server: McpServer): void {
           const canvasY = y + offsetY;
 
           if (canvasX >= 0 && canvasX < state.width && canvasY >= 0 && canvasY < state.height) {
-            pm.setCell(canvasX, canvasY, { char, color, bgColor });
-            cellsSet++;
+            cells.push({
+              x: canvasX,
+              y: canvasY,
+              cell: { char, color, bgColor },
+            });
           }
         }
       }
 
-      // Broadcast import completed
-      broadcastStateChange('import_ascii_text', { cellsSet });
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          frameIndex,
+          cells,
+        });
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             success: true,
+            browserSynced: applied.browserSynced,
             sourceFile: fullPath,
             dimensions: { width: Math.max(...lines.map(l => l.length)), height: lines.length },
-            cellsSet,
+            frameIndex: applied.frameIndex,
+            cellsSet: applied.cellsChanged,
             offset: { x: offsetX, y: offsetY },
           })
         }],

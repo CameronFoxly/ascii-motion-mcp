@@ -6,8 +6,9 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager, broadcastStateChange } from '../state.js';
-import { SessionDataSchema } from '../types.js';
+import { getProjectManager, broadcastStateChange, ProjectStateManager } from '../state.js';
+import { requestBrowserCommand, requireFreshBrowserState } from '../live-sync.js';
+import type { BrowserCommandResult } from '../transport/websocket.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -136,7 +137,9 @@ export function registerProjectTools(server: McpServer): void {
         const dir = path.dirname(validation.resolved);
         await fs.mkdir(dir, { recursive: true });
         
-        const sessionData = pm.toSessionData();
+        const sessionData = pm.isLayerMode()
+          ? pm.toSessionDataV2()
+          : pm.toSessionData();
         const json = JSON.stringify(sessionData, null, 2);
         
         await fs.writeFile(validation.resolved, json, 'utf-8');
@@ -177,6 +180,7 @@ export function registerProjectTools(server: McpServer): void {
       filePath: z.string().describe('File path relative to project directory'),
     },
     async ({ filePath }) => {
+      let browserApplied = false;
       const validation = validatePath(filePath);
       if (!validation.valid) {
         return {
@@ -188,12 +192,35 @@ export function registerProjectTools(server: McpServer): void {
       try {
         const content = await fs.readFile(validation.resolved, 'utf-8');
         const data = JSON.parse(content);
-        
-        // Validate the data
-        const sessionData = SessionDataSchema.parse(data);
-        
+
+        // Validate without changing the active project before browser acknowledgement.
+        const candidate = new ProjectStateManager();
+        candidate.loadFromUnknownSessionData(data, validation.resolved);
+
         const pm = getProjectManager();
-        pm.loadFromSessionData(sessionData, validation.resolved);
+        const reconcileLoadedProject = async (
+          result: BrowserCommandResult,
+        ): Promise<void> => {
+          browserApplied = true;
+          pm.loadFromUnknownSessionData(data, validation.resolved);
+          if (result.applied?.currentFrameIndex !== undefined) {
+            pm.goToFrame(result.applied.currentFrameIndex);
+          }
+          await requireFreshBrowserState();
+          pm.setFilePath(validation.resolved);
+        };
+        const commandResult = await requestBrowserCommand(
+          {
+            type: 'load_project',
+            sessionData: data,
+          },
+          undefined,
+          reconcileLoadedProject,
+        );
+
+        if (!commandResult) {
+          pm.loadFromUnknownSessionData(data, validation.resolved);
+        }
         
         const state = pm.getState();
         
@@ -202,6 +229,7 @@ export function registerProjectTools(server: McpServer): void {
             type: 'text', 
             text: JSON.stringify({
               success: true,
+              browserSynced: commandResult !== null,
               filePath: validation.resolved,
               project: {
                 name: state.name,
@@ -216,7 +244,15 @@ export function registerProjectTools(server: McpServer): void {
         };
       } catch (error) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Failed to load: ${error instanceof Error ? error.message : 'Unknown error'}` }) }],
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              browserApplied,
+              stateReconciled: false,
+              error: `Failed to load: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            }),
+          }],
           isError: true,
         };
       }
