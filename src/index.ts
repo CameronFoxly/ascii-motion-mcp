@@ -132,8 +132,8 @@ LIVE MODE:
 
   Connect URL: ws://127.0.0.1:PORT/?token=AUTH_TOKEN
 
-AVAILABLE TOOLS (77+ total):
-  Canvas (8), Frames (7), Project (6), Preview (5), Animation (5),
+AVAILABLE TOOLS (78+ total):
+  Canvas (8), Frames (7), Project (6), Preview (6), Animation (5),
   Selection (6), History (3), Export (11), Import (3), Effects (4),
   Generators (2), Layers (17)
 

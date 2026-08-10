@@ -9,7 +9,58 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
-import { parseCellKey, type Cell } from '../types.js';
+import { parseCellKey, type Cell, type Frame } from '../types.js';
+import {
+  framesToAnsi,
+  type AnsiColorMode,
+  type AnsiFrameSelection,
+} from './ansi-renderer.js';
+
+export const MAX_CANVAS_RENDER_FRAMES = 24;
+export const MAX_CANVAS_RENDER_OUTPUT_BYTES = 1024 * 1024;
+export const MAX_CANVAS_RENDER_WIDTH = 200;
+
+export interface CanvasRenderInput {
+  frameIndex?: number;
+  allFrames?: boolean;
+  colorMode?: AnsiColorMode;
+  maxWidth?: number;
+  trimEmpty?: boolean;
+}
+
+export interface CanvasRenderState {
+  width: number;
+  height: number;
+  backgroundColor: string;
+  frames: readonly Frame[];
+  currentFrameIndex: number;
+}
+
+export interface CanvasRenderDependencies {
+  ensureFreshState: () => Promise<void>;
+  getState: () => CanvasRenderState;
+}
+
+export interface CanvasRenderLimits {
+  maxFrames: number;
+  maxOutputBytes: number;
+}
+
+export interface CanvasRenderToolResult {
+  [key: string]: unknown;
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: true;
+}
+
+const DEFAULT_CANVAS_RENDER_DEPENDENCIES: CanvasRenderDependencies = {
+  ensureFreshState: ensureFreshBrowserState,
+  getState: () => getProjectManager().getState(),
+};
+
+const DEFAULT_CANVAS_RENDER_LIMITS: CanvasRenderLimits = {
+  maxFrames: MAX_CANVAS_RENDER_FRAMES,
+  maxOutputBytes: MAX_CANVAS_RENDER_OUTPUT_BYTES,
+};
 
 // Region schema with optional fields to handle partial inputs from MCP Inspector
 const RegionSchema = z.object({
@@ -98,6 +149,22 @@ export function registerPreviewTools(server: McpServer): void {
   );
 
   // ==========================================================================
+  // get_canvas_render - Raw ANSI terminal render
+  // ==========================================================================
+  server.tool(
+    'get_canvas_render',
+    'Render the current frame (or a bounded set of all frames) as raw ANSI-colored terminal text. The text payload contains actual ESC bytes and can be printed directly.',
+    {
+      frameIndex: z.number().int().min(0).optional().describe('Frame index (defaults to current). Cannot be combined with allFrames.'),
+      allFrames: z.boolean().default(false).describe(`Render every frame with separators (maximum ${MAX_CANVAS_RENDER_FRAMES} frames)`),
+      colorMode: z.enum(['16', '256', 'truecolor']).default('truecolor').describe('ANSI color mode'),
+      maxWidth: z.number().int().min(1).max(MAX_CANVAS_RENDER_WIDTH).optional().describe('Downsample to at most this many character columns without upscaling'),
+      trimEmpty: z.boolean().default(true).describe('Trim empty outer rows and columns before rendering'),
+    },
+    async (input) => getCanvasRender(input)
+  );
+
+  // ==========================================================================
   // get_canvas_preview - Sparse cell data
   // ==========================================================================
   server.tool(
@@ -119,7 +186,7 @@ export function registerPreviewTools(server: McpServer): void {
           isError: true,
         };
       }
-      
+
       const frame = frameIndex !== undefined ? state.frames[frameIndex] : pm.getCurrentFrame();
       
       const regionX = region?.x ?? 0;
@@ -417,4 +484,76 @@ export function registerPreviewTools(server: McpServer): void {
       };
     }
   );
+}
+
+export async function getCanvasRender(
+  input: CanvasRenderInput,
+  dependencies: CanvasRenderDependencies = DEFAULT_CANVAS_RENDER_DEPENDENCIES,
+  limits: CanvasRenderLimits = DEFAULT_CANVAS_RENDER_LIMITS
+): Promise<CanvasRenderToolResult> {
+  await dependencies.ensureFreshState();
+  const state = dependencies.getState();
+  const allFrames = input.allFrames ?? false;
+
+  if (allFrames && input.frameIndex !== undefined) {
+    return canvasRenderError('frameIndex cannot be combined with allFrames=true.');
+  }
+
+  if (input.maxWidth !== undefined
+    && (!Number.isInteger(input.maxWidth) || input.maxWidth < 1 || input.maxWidth > MAX_CANVAS_RENDER_WIDTH)) {
+    return canvasRenderError(`maxWidth must be an integer between 1 and ${MAX_CANVAS_RENDER_WIDTH}.`);
+  }
+
+  if (state.frames.length === 0) {
+    return canvasRenderError('The project has no frames to render.');
+  }
+
+  let selections: AnsiFrameSelection[];
+  if (allFrames) {
+    if (state.frames.length > limits.maxFrames) {
+      return canvasRenderError(
+        `Cannot render all ${state.frames.length} frames: allFrames is limited to ${limits.maxFrames} frames. Use frameIndex to render one frame.`
+      );
+    }
+    selections = state.frames.map((frame, index) => ({ frame, index }));
+  } else {
+    const frameIndex = input.frameIndex ?? state.currentFrameIndex;
+    if (!Number.isInteger(frameIndex) || frameIndex < 0 || frameIndex >= state.frames.length) {
+      return canvasRenderError(
+        `Frame index ${frameIndex} is out of range. Valid frame indexes are 0-${state.frames.length - 1}.`
+      );
+    }
+    selections = [{ frame: state.frames[frameIndex], index: frameIndex }];
+  }
+
+  const ansi = framesToAnsi(
+    selections,
+    state.width,
+    state.height,
+    {
+      colorMode: input.colorMode ?? 'truecolor',
+      canvasBackground: state.backgroundColor,
+      maxWidth: input.maxWidth,
+      trimEmpty: input.trimEmpty ?? true,
+    },
+    allFrames
+  );
+
+  const outputBytes = Buffer.byteLength(ansi, 'utf8');
+  if (outputBytes > limits.maxOutputBytes) {
+    return canvasRenderError(
+      `ANSI render is ${outputBytes} bytes, exceeding the ${limits.maxOutputBytes}-byte output limit. Reduce maxWidth or render a single frame.`
+    );
+  }
+
+  return {
+    content: [{ type: 'text', text: ansi }],
+  };
+}
+
+function canvasRenderError(message: string): CanvasRenderToolResult {
+  return {
+    content: [{ type: 'text', text: message }],
+    isError: true,
+  };
 }

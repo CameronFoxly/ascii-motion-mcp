@@ -13,8 +13,9 @@ const LLM_BEST_PRACTICES_GUIDE = `# ASCII Motion MCP - LLM Best Practices
 
 Before placing ANY animated elements (circles, indicators, data flow particles), you MUST:
 1. Use get_canvas_ascii to see the full layout
-2. Use get_canvas_preview with a region to get exact coordinates
-3. Place elements EXACTLY on connection line characters, not near them
+2. Use get_canvas_render to review the colored terminal composition
+3. Use get_canvas_preview with a region to get exact coordinates
+4. Place elements EXACTLY on connection line characters, not near them
 
 ### Why This Matters
 ASCII diagrams use box-drawing characters at specific x,y coordinates.
@@ -71,10 +72,11 @@ Use consistent colors to convey meaning:
 1. new_project(name, width, height)
 2. paste_ascii_block(text, x, y, color)
 3. get_canvas_ascii() - review layout
-4. get_canvas_preview(region) - get exact coordinates
-5. set_cell() for base indicators using EXACT coords
-6. copy_frame_and_modify() for each animation step (reverse order!)
-7. describe_animation() to verify
+4. get_canvas_render(maxWidth=80) - review terminal colors and composition
+5. get_canvas_preview(region) - get exact coordinates
+6. set_cell() for base indicators using EXACT coords
+7. copy_frame_and_modify() for each animation step (reverse order!)
+8. describe_animation() to verify
 `;
 
 const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.1.0)
@@ -84,6 +86,7 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.1.0)
 - get_cell - Read cell at position
 - clear_cell - Clear a cell
 - get_canvas_ascii - Get ASCII text preview
+- get_canvas_render - Get raw ANSI-colored terminal preview
 - get_canvas_preview - Get cell data for region with exact coordinates
 - paste_ascii_block - Paste multi-line ASCII art
 - fill_region - Fill area with character
