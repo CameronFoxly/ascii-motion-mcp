@@ -19,6 +19,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey } from '../types.js';
+import { frameToAnsi } from './ansi-renderer.js';
 
 export function registerExportTools(server: McpServer): void {
   // ==========================================================================
@@ -457,7 +458,10 @@ export function registerExportTools(server: McpServer): void {
         };
       }
       
-      const ansi = frameToAnsi(frame.data, state.width, state.height, colorMode);
+      const ansi = frameToAnsi(frame.data, state.width, state.height, {
+        colorMode,
+        canvasBackground: state.backgroundColor,
+      }).ansi;
       
       return {
         content: [{ 
@@ -785,98 +789,6 @@ ${ts ? `export const ${componentName}: React.FC<${componentName}Props> = ({` : `
 
 export default ${componentName};
 `;
-}
-
-function frameToAnsi(
-  data: Record<string, { char: string; color: string; bgColor: string }>,
-  width: number,
-  height: number,
-  colorMode: '16' | '256' | 'truecolor'
-): string {
-  const lines: string[] = [];
-  const RESET = '\x1b[0m';
-  
-  for (let y = 0; y < height; y++) {
-    let line = '';
-    
-    for (let x = 0; x < width; x++) {
-      const cell = data[`${x},${y}`];
-      const char = cell?.char ?? ' ';
-      const color = cell?.color ?? '#FFFFFF';
-      const bgColor = cell?.bgColor ?? 'transparent';
-      
-      let colorCode = '';
-      
-      if (colorMode === 'truecolor') {
-        // 24-bit true color
-        const fg = hexToRgb(color);
-        colorCode += `\x1b[38;2;${fg.r};${fg.g};${fg.b}m`;
-        
-        if (bgColor !== 'transparent') {
-          const bg = hexToRgb(bgColor);
-          colorCode += `\x1b[48;2;${bg.r};${bg.g};${bg.b}m`;
-        }
-      } else if (colorMode === '256') {
-        // 256-color mode (approximate)
-        colorCode += `\x1b[38;5;${hexTo256(color)}m`;
-        if (bgColor !== 'transparent') {
-          colorCode += `\x1b[48;5;${hexTo256(bgColor)}m`;
-        }
-      } else {
-        // 16-color ANSI
-        colorCode += `\x1b[${hexTo16Fg(color)}m`;
-        if (bgColor !== 'transparent') {
-          colorCode += `\x1b[${hexTo16Bg(bgColor)}m`;
-        }
-      }
-      
-      line += colorCode + char + RESET;
-    }
-    
-    lines.push(line);
-  }
-  
-  return lines.join('\n');
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  } : { r: 255, g: 255, b: 255 };
-}
-
-function hexTo256(hex: string): number {
-  const { r, g, b } = hexToRgb(hex);
-  // Approximate to 256-color palette (16-231 are 6x6x6 color cube)
-  const ri = Math.round(r / 255 * 5);
-  const gi = Math.round(g / 255 * 5);
-  const bi = Math.round(b / 255 * 5);
-  return 16 + 36 * ri + 6 * gi + bi;
-}
-
-function hexTo16Fg(hex: string): number {
-  const { r, g, b } = hexToRgb(hex);
-  const brightness = (r + g + b) / 3;
-  const isBright = brightness > 127;
-  
-  // Simple mapping to 16 ANSI colors
-  if (r > 200 && g < 100 && b < 100) return isBright ? 91 : 31; // Red
-  if (r < 100 && g > 200 && b < 100) return isBright ? 92 : 32; // Green
-  if (r > 200 && g > 200 && b < 100) return isBright ? 93 : 33; // Yellow
-  if (r < 100 && g < 100 && b > 200) return isBright ? 94 : 34; // Blue
-  if (r > 200 && g < 100 && b > 200) return isBright ? 95 : 35; // Magenta
-  if (r < 100 && g > 200 && b > 200) return isBright ? 96 : 36; // Cyan
-  if (brightness > 200) return 97; // White
-  if (brightness < 50) return 30; // Black
-  return isBright ? 37 : 90; // Gray
-}
-
-function hexTo16Bg(hex: string): number {
-  // Background colors are foreground + 10
-  return hexTo16Fg(hex) + 10;
 }
 
 function escapeHtml(str: string): string {

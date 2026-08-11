@@ -13,6 +13,7 @@ ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, an
 - 🎬 **Animate** - Build frame-by-frame animations with onion skinning
 - 📥 **Import** - Convert images to ASCII art with full control
 - 📤 **Export** - Save as PNG, GIF, MP4, HTML, React, or CLI components
+- 🖥️ **Preview inline** - Render the live canvas as ANSI-colored terminal text
 - 🌈 **Apply effects** - Add digital rain, noise, color shifts, and more
 
 All through natural language prompts!
@@ -268,7 +269,12 @@ Once configured, try these prompts with your AI assistant:
 **CLI Components:**
 > "Export as an Ink component for my Node.js CLI app"
 
-## Available Tools (69 total)
+**Inline Terminal Preview:**
+> "Show the current canvas with get_canvas_render in truecolor at maxWidth 80"
+
+`get_canvas_render` returns raw ANSI text with actual escape bytes, ready for a terminal to print directly. It supports `colorMode` (`16`, `256`, or `truecolor`), `frameIndex` or `allFrames`, `maxWidth`, and `trimEmpty`. All-frame renders are limited to 24 frames and every response is capped at 1 MiB.
+
+## Available Tools (70 total)
 
 ### Canvas Tools
 `set_cell`, `get_cell`, `clear_cell`, `set_cells_batch`, `paste_ascii_block`, `fill_region`, `resize_canvas`, `clear_canvas`
@@ -283,7 +289,7 @@ Once configured, try these prompts with your AI assistant:
 `new_project`, `save_project`, `load_project`, `get_project_info`, `list_project_files`, `set_project_name`
 
 ### Preview Tools
-`get_canvas_summary`, `get_canvas_preview`, `get_canvas_ascii`, `get_frame_diff`, `describe_animation`
+`get_canvas_summary`, `get_canvas_preview`, `get_canvas_ascii`, `get_canvas_render`, `get_frame_diff`, `describe_animation`
 
 ### Selection Tools
 `select_rectangle`, `select_by_color`, `get_selection`, `clear_selection`, `apply_to_selection`, `delete_selection_content`
