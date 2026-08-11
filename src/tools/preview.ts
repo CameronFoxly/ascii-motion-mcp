@@ -37,7 +37,7 @@ export interface CanvasRenderState {
 }
 
 export interface CanvasRenderDependencies {
-  ensureFreshState: () => Promise<void>;
+  ensureFreshState: () => Promise<unknown>;
   getState: () => CanvasRenderState;
 }
 
