@@ -18,6 +18,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getProjectManager, setWebSocketBroadcaster, setEnsureFreshStateCallback } from './state.js';
 import { HybridTransport } from './transport/index.js';
+import { setBrowserCommandCallback } from './live-sync.js';
 import {
   registerCanvasTools,
   registerFrameTools,
@@ -208,6 +209,13 @@ async function main(): Promise<void> {
     // Set up WebSocket broadcaster for state changes
     setWebSocketBroadcaster((type, data) => {
       hybridTransport?.broadcastStateChange(type, data);
+    });
+    setBrowserCommandCallback((command, timeoutMs, afterAcknowledged) => {
+      return hybridTransport!.requestBrowserCommand(
+        command,
+        timeoutMs,
+        afterAcknowledged,
+      );
     });
 
     // Start WebSocket server

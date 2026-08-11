@@ -5,4 +5,11 @@
  */
 
 export { WebSocketServerTransport, HybridTransport } from './websocket.js';
-export type { WebSocketTransportOptions } from './websocket.js';
+export type {
+  BrowserCommand,
+  BrowserCommandApplied,
+  BrowserCommandFinalizer,
+  BrowserCommandRequest,
+  BrowserCommandResult,
+  WebSocketTransportOptions,
+} from './websocket.js';

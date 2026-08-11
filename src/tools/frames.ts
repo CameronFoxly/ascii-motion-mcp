@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
+import { requestBrowserCommand } from '../live-sync.js';
 import { ensureFreshBrowserState } from '../state.js';
 
 export function registerFrameTools(server: McpServer): void {
@@ -289,18 +290,48 @@ export function registerFrameTools(server: McpServer): void {
       }
       
       const previousDuration = state.frames[index].duration;
-      const success = pm.setFrameDuration(index, duration);
-      
-      // Broadcast duration change
-      broadcastStateChange('set_frame_duration', { index, duration });
+      let commandResult;
+      try {
+        commandResult = await requestBrowserCommand({
+          type: 'set_frame_duration',
+          index,
+          duration,
+        });
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      const appliedDuration = commandResult?.applied?.durationMs ?? duration;
+      const success = pm.setFrameDuration(
+        index,
+        appliedDuration,
+        true,
+        commandResult === null,
+      );
+      if (commandResult?.applied?.currentFrameIndex !== undefined) {
+        pm.goToFrame(commandResult.applied.currentFrameIndex);
+      }
+
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({
             success,
+            browserSynced: commandResult !== null,
             frameIndex: index,
             previousDuration,
+            requestedDuration: duration,
             newDuration: pm.getState().frames[index].duration,
+            currentFrameIndex: pm.getState().currentFrameIndex,
           }) 
         }],
       };

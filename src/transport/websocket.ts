@@ -38,6 +38,47 @@ export interface ExportResult {
   bytes?: number;
 }
 
+export interface BrowserCommand {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface BrowserCommandRequest {
+  type: 'command_request';
+  requestId: string;
+  command: BrowserCommand;
+}
+
+export interface BrowserCommandApplied {
+  currentFrameIndex?: number;
+  cellsChanged?: number;
+  frameRate?: number;
+  durationMs?: number;
+}
+
+export interface BrowserCommandResult {
+  type: 'command_result';
+  requestId: string;
+  success: boolean;
+  error?: string;
+  applied?: BrowserCommandApplied;
+}
+
+export type BrowserCommandFinalizer = (
+  result: BrowserCommandResult,
+) => void | Promise<void>;
+
+interface PendingBrowserCommand {
+  request: BrowserCommandRequest;
+  timeoutMs: number;
+  resolve: (result: BrowserCommandResult) => void;
+  reject: (error: Error) => void;
+  client?: WebSocket;
+  timeout?: NodeJS.Timeout;
+  afterAcknowledged?: BrowserCommandFinalizer;
+  acknowledged?: boolean;
+}
+
 export class WebSocketServerTransport {
   private wss: WebSocketServer | null = null;
   private httpServer: http.Server | null = null;
@@ -46,6 +87,9 @@ export class WebSocketServerTransport {
   private _authToken: string;
   onStateSnapshot?: (snapshot: unknown) => void;
   private pendingExportResolvers: Map<string, (result: ExportResult) => void> = new Map();
+  private commandQueue: PendingBrowserCommand[] = [];
+  private activeCommand: PendingBrowserCommand | null = null;
+  private requiresStateReconciliation = false;
   private options: WebSocketTransportOptions;
   
   onclose?: () => void;
@@ -73,6 +117,11 @@ export class WebSocketServerTransport {
    */
   get sessionId(): string {
     return this._sessionId;
+  }
+
+  get port(): number {
+    const address = this.httpServer?.address();
+    return typeof address === 'object' && address ? address.port : this.options.port;
   }
 
   /**
@@ -139,6 +188,9 @@ export class WebSocketServerTransport {
             // Handle state_snapshot from browser
             if (rawMessage.type === 'state_snapshot') {
               console.error('[ws-transport] Received state snapshot from browser');
+              if (ws.readyState === WebSocket.OPEN) {
+                this.requiresStateReconciliation = false;
+              }
               this.onStateSnapshot?.(rawMessage);
               return;
             }
@@ -152,6 +204,10 @@ export class WebSocketServerTransport {
               }
               return;
             }
+            if (rawMessage.type === 'command_result') {
+              this.handleBrowserCommandResult(rawMessage as BrowserCommandResult);
+              return;
+            }
             const message = rawMessage as JSONRPCMessage;
             this.onmessage?.(message);
           } catch (error) {
@@ -163,10 +219,22 @@ export class WebSocketServerTransport {
         ws.on('close', () => {
           console.error('[ws-transport] Client disconnected');
           this.clients.delete(ws);
+          if (this.activeCommand?.client === ws) {
+            this.quarantineBrowserCommandChannel(
+              'Browser disconnected before command completed',
+              'Command acknowledgement interrupted',
+            );
+          }
         });
 
         ws.on('error', (error) => {
           console.error('[ws-transport] Client error:', error);
+          if (this.activeCommand?.client === ws) {
+            this.quarantineBrowserCommandChannel(
+              `Browser connection error: ${error.message}`,
+              'Command connection error',
+            );
+          }
           this.clients.delete(ws);
           this.onerror?.(error);
         });
@@ -295,10 +363,168 @@ export class WebSocketServerTransport {
   }
 
   /**
+   * Queue a browser mutation and wait for its correlated acknowledgement.
+   * Only one command is in flight at a time so browser mutations are applied FIFO.
+   */
+  async requestBrowserCommand(
+    command: BrowserCommand,
+    timeoutMs = 5000,
+    afterAcknowledged?: BrowserCommandFinalizer,
+  ): Promise<BrowserCommandResult> {
+    if (this.requiresStateReconciliation) {
+      throw new Error('Browser command channel requires reconnect and state reconciliation');
+    }
+    if (!this.getOpenClient()) {
+      throw new Error('No browser connected');
+    }
+
+    const request: BrowserCommandRequest = {
+      type: 'command_request',
+      requestId: crypto.randomUUID(),
+      command,
+    };
+
+    return new Promise((resolve, reject) => {
+      this.commandQueue.push({
+        request,
+        timeoutMs,
+        resolve,
+        reject,
+        afterAcknowledged,
+      });
+      this.dispatchNextBrowserCommand();
+    });
+  }
+
+  private getOpenClient(): WebSocket | undefined {
+    return Array.from(this.clients).find(client => client.readyState === WebSocket.OPEN);
+  }
+
+  private dispatchNextBrowserCommand(): void {
+    if (this.activeCommand || this.commandQueue.length === 0) return;
+
+    const client = this.getOpenClient();
+    if (!client) {
+      this.rejectPendingBrowserCommands('No browser connected');
+      return;
+    }
+
+    const pending = this.commandQueue.shift()!;
+    pending.client = client;
+    pending.timeout = setTimeout(() => {
+      if (this.activeCommand !== pending) return;
+      this.quarantineBrowserCommandChannel(
+        `Browser command "${pending.request.command.type}" timed out after ${pending.timeoutMs}ms`,
+        'Command acknowledgement timed out',
+      );
+    }, pending.timeoutMs);
+    this.activeCommand = pending;
+
+    try {
+      client.send(JSON.stringify(pending.request), error => {
+        if (error && this.activeCommand === pending && !pending.acknowledged) {
+          this.quarantineBrowserCommandChannel(
+            `Failed to send browser command "${pending.request.command.type}": ${error.message}`,
+            'Command send failed',
+          );
+        }
+      });
+    } catch (error) {
+      this.quarantineBrowserCommandChannel(
+        `Failed to send browser command "${pending.request.command.type}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        'Command send failed',
+      );
+    }
+  }
+
+  private handleBrowserCommandResult(result: BrowserCommandResult): void {
+    const pending = this.activeCommand;
+    if (
+      !pending
+      || pending.acknowledged
+      || pending.request.requestId !== result.requestId
+    ) return;
+
+    if (!result.success) {
+      this.finishActiveBrowserCommand(
+        new Error(result.error || `Browser rejected command "${pending.request.command.type}"`),
+      );
+      return;
+    }
+
+    pending.acknowledged = true;
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+      pending.timeout = undefined;
+    }
+
+    if (!pending.afterAcknowledged) {
+      this.finishActiveBrowserCommand(undefined, result, pending);
+      return;
+    }
+
+    void Promise.resolve(pending.afterAcknowledged(result)).then(
+      () => this.finishActiveBrowserCommand(undefined, result, pending),
+      error => this.quarantineBrowserCommandChannel(
+        error instanceof Error ? error.message : String(error),
+        'Command reconciliation failed',
+      ),
+    );
+  }
+
+  private finishActiveBrowserCommand(
+    error?: Error,
+    result?: BrowserCommandResult,
+    expectedPending?: PendingBrowserCommand,
+  ): void {
+    const pending = this.activeCommand;
+    if (!pending || (expectedPending && pending !== expectedPending)) return;
+
+    if (pending.timeout) clearTimeout(pending.timeout);
+    this.activeCommand = null;
+
+    if (error) {
+      pending.reject(error);
+    } else {
+      pending.resolve(result!);
+    }
+
+    this.dispatchNextBrowserCommand();
+  }
+
+  private rejectPendingBrowserCommands(message: string): void {
+    const active = this.activeCommand;
+    this.activeCommand = null;
+    if (active) {
+      if (active.timeout) clearTimeout(active.timeout);
+      active.reject(new Error(message));
+    }
+
+    const queued = this.commandQueue.splice(0);
+    for (const pending of queued) {
+      pending.reject(new Error(message));
+    }
+  }
+
+  private quarantineBrowserCommandChannel(message: string, closeReason: string): void {
+    this.requiresStateReconciliation = true;
+    this.rejectPendingBrowserCommands(message);
+    for (const client of this.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.close(1011, closeReason);
+      }
+    }
+  }
+
+  /**
    * Close the WebSocket server.
    */
   async close(): Promise<void> {
     return new Promise((resolve) => {
+      this.rejectPendingBrowserCommands('WebSocket transport closed before command completed');
+
       // Close all client connections
       for (const client of this.clients) {
         client.close(1000, 'Server shutting down');
@@ -380,5 +606,13 @@ export class HybridTransport {
 
   async requestExportFromBrowser(request: ExportRequest, timeoutMs = 60000): Promise<ExportResult> {
     return this.wsTransport.requestExportFromBrowser(request, timeoutMs);
+  }
+
+  async requestBrowserCommand(
+    command: BrowserCommand,
+    timeoutMs = 5000,
+    afterAcknowledged?: BrowserCommandFinalizer,
+  ): Promise<BrowserCommandResult> {
+    return this.wsTransport.requestBrowserCommand(command, timeoutMs, afterAcknowledged);
   }
 }

@@ -387,6 +387,7 @@ export const SessionDataV2Schema = z.object({
         easing: EasingCurveSchema,
       })),
     })),
+    effectTracks: z.array(EffectTrackSchema).optional(),
     staticProperties: z.record(z.string(), z.number()).optional(),
     syncKeyframesToFrames: z.boolean().optional(),
   })),

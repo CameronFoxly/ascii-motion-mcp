@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange, ensureFreshBrowserState } from '../state.js';
+import { requestBrowserCommand } from '../live-sync.js';
 import {
   EasingCurveSchema,
   PropertyPathSchema,
@@ -526,15 +527,38 @@ export function registerLayerTools(server: McpServer): void {
     },
     async ({ fps }) => {
       const pm = getProjectManager();
-      pm.setFrameRate(fps);
+      const previousFrameRate = pm.getState().timelineConfig.frameRate;
+      const durationFrames = pm.getState().timelineConfig.durationFrames;
+      let commandResult;
+      try {
+        commandResult = await requestBrowserCommand({
+          type: 'set_frame_rate',
+          fps,
+          preserveFrameCount: true,
+        });
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
 
-      broadcastStateChange('set_frame_rate', { fps });
+      const appliedFrameRate = commandResult?.applied?.frameRate ?? fps;
+      pm.setFrameRate(appliedFrameRate);
 
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({
           success: true,
-          frameRate: fps,
-          durationFrames: pm.getState().timelineConfig.durationFrames,
+          browserSynced: commandResult !== null,
+          previousFrameRate,
+          frameRate: pm.getState().timelineConfig.frameRate,
+          durationFrames,
         }) }],
       };
     }

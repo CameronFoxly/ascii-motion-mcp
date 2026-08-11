@@ -9,6 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
 import { isInBounds } from '../types.js';
+import { applyExactCellChanges, requireFreshBrowserState } from '../live-sync.js';
 
 export function registerCanvasTools(server: McpServer): void {
   // ==========================================================================
@@ -288,6 +289,21 @@ export function registerCanvasTools(server: McpServer): void {
       matchBgColor: z.boolean().default(false).describe('Only fill cells that match the starting cell background'),
     },
     async ({ x, y, char, color, bgColor, contiguous, matchChar, matchColor, matchBgColor }) => {
+      try {
+        await requireFreshBrowserState();
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
       const pm = getProjectManager();
       const state = pm.getState();
       
@@ -299,18 +315,43 @@ export function registerCanvasTools(server: McpServer): void {
       }
       
       const fillCell = { char, color, bgColor };
-      const cellsFilled = pm.fillRegion(x, y, fillCell, {
+      const cells = pm.planFillRegion(x, y, fillCell, {
         contiguous,
         matchChar,
         matchColor,
         matchBgColor,
       });
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('fill_region', { cellsFilled });
+
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          frameIndex: state.currentFrameIndex,
+          cells,
+        });
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
       
       return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, cellsFilled }) }],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
+            cellsFilled: applied.cellsChanged,
+          }),
+        }],
       };
     }
   );

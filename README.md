@@ -194,6 +194,45 @@ After configuring your AI client, you must connect the ASCII Motion browser app 
 
 You should see a green "Connected" status. Now your AI's edits appear in real-time!
 
+### Live mutation acknowledgements
+
+Live-mode mutations that use the command channel are successful only after the
+browser acknowledges the matching request. Commands are sent one at a time in
+FIFO order:
+
+```ts
+// MCP server -> browser
+{
+  type: 'command_request',
+  requestId: string,
+  command: { type: string, ...payload }
+}
+
+// Browser -> MCP server
+{
+  type: 'command_result',
+  requestId: string,
+  success: boolean,
+  error?: string,
+  applied?: {
+    currentFrameIndex?: number,
+    cellsChanged?: number,
+    frameRate?: number,
+    durationMs?: number
+  }
+}
+```
+
+Browser rejection, timeout, send failure, or disconnect returns an MCP tool
+error instead of a success based only on server-side state. Exact cell edits
+are batched in one `set_cells_batch` command; an empty cell (`" "` with
+`#FFFFFF` and a transparent background) explicitly clears that coordinate.
+Without `--live`, the same tools update local MCP state and return
+`browserSynced: false` rather than implying that a browser changed.
+
+See [Live Browser Command Protocol](docs/LIVE_SYNC_PROTOCOL.md) for payload,
+ordering, timeout, and compatibility details.
+
 ## CLI Options
 
 ```
