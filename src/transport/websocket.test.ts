@@ -145,11 +145,52 @@ describe('WebSocketServerTransport browser commands', () => {
     await expect(second).resolves.toMatchObject({ success: true });
   });
 
+  it('prepares a queued command after prior reconciliation completes', async () => {
+    let reconciledFrameIndex = 0;
+    const navigation = transport.requestBrowserCommand(
+      { type: 'go_to_frame', index: 1 },
+      500,
+      () => {
+        reconciledFrameIndex = 1;
+      },
+    );
+    const prepared = transport.requestBrowserCommand(
+      { type: 'prepared_mutation' },
+      500,
+      undefined,
+      () => ({
+        type: 'prepared_mutation',
+        observedFrameIndex: reconciledFrameIndex,
+      }),
+    );
+
+    await waitFor(() => requests.length === 1);
+    client.send(JSON.stringify({
+      type: 'command_result',
+      requestId: requests[0].requestId,
+      success: true,
+      applied: { currentFrameIndex: 1 },
+    }));
+    await expect(navigation).resolves.toMatchObject({ success: true });
+
+    await waitFor(() => requests.length === 2);
+    expect(requests[1].command).toEqual({
+      type: 'prepared_mutation',
+      observedFrameIndex: 1,
+    });
+    client.send(JSON.stringify({
+      type: 'command_result',
+      requestId: requests[1].requestId,
+      success: true,
+    }));
+    await expect(prepared).resolves.toMatchObject({ success: true });
+  });
+
   it('quarantines the channel when post-acknowledgement reconciliation fails', async () => {
     const first = transport.requestBrowserCommand(
       { type: 'load_project' },
       500,
-      async () => {
+      () => {
         throw new Error('State reconciliation failed');
       },
     );
@@ -183,6 +224,28 @@ describe('WebSocketServerTransport browser commands', () => {
     );
     await queuedExpectation;
     expect(requests).toHaveLength(1);
+    await expect(
+      transport.requestBrowserCommand({ type: 'blocked_until_reconnect' }),
+    ).rejects.toThrow('requires reconnect and state reconciliation');
+  });
+
+  it('times out stalled command preparation and rejects the queue', async () => {
+    const result = transport.requestBrowserCommand(
+      { type: 'stalled_preparation' },
+      20,
+      undefined,
+      () => new Promise(() => {}),
+    );
+    const queued = transport.requestBrowserCommand({ type: 'must_not_run' }, 500);
+    const queuedExpectation = expect(queued).rejects.toThrow(
+      'Browser command "stalled_preparation" timed out after 20ms',
+    );
+
+    await expect(result).rejects.toThrow(
+      'Browser command "stalled_preparation" timed out after 20ms',
+    );
+    await queuedExpectation;
+    expect(requests).toHaveLength(0);
     await expect(
       transport.requestBrowserCommand({ type: 'blocked_until_reconnect' }),
     ).rejects.toThrow('requires reconnect and state reconciliation');

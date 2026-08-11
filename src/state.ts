@@ -315,7 +315,7 @@ export class ProjectStateManager {
 
   /**
    * Apply exact cells to an explicit frame without changing the current frame.
-   * In layer mode, frameIndex addresses a timeline frame on the active layer.
+   * In layer mode, frameIndex addresses a content-frame ordinal on the active layer.
    */
   setCellsOnFrame(
     frameIndex: number,
@@ -328,7 +328,7 @@ export class ProjectStateManager {
     if (this.isLayerMode()) {
       const layer = this.getActiveLayer();
       if (!layer || layer.locked) return 0;
-      const contentFrame = this.getContentFrameAtTime(layer, frameIndex);
+      const contentFrame = layer.contentFrames[frameIndex];
       if (!contentFrame) return 0;
       dataTarget = contentFrame.data;
       description = `Set ${cells.length} cells on frame ${frameIndex} of layer "${layer.name}"`;
@@ -346,17 +346,36 @@ export class ProjectStateManager {
     cells: Array<{ x: number; y: number; cell: Cell }>,
     recordHistory = true,
   ): number {
-    return this.setCellsOnFrame(frameIndex, cells, recordHistory);
+    if (!this.isLayerMode()) {
+      return this.setCellsOnFrame(frameIndex, cells, recordHistory);
+    }
+
+    const layer = this.getActiveLayer();
+    if (!layer || layer.locked) return 0;
+    const contentFrame = this.getContentFrameAtTime(layer, frameIndex);
+    if (!contentFrame) return 0;
+    return this.setCellsInData(
+      contentFrame.data,
+      cells,
+      `Set ${cells.length} cells at timeline frame ${frameIndex} of layer "${layer.name}"`,
+      recordHistory,
+    );
   }
 
   hasCellFrame(frameIndex: number): boolean {
     if (this.isLayerMode()) {
       const layer = this.getActiveLayer();
-      return frameIndex >= 0
-        && frameIndex < this.state.timelineConfig.durationFrames
-        && Boolean(layer && this.getContentFrameAtTime(layer, frameIndex));
+      return Boolean(layer?.contentFrames[frameIndex]);
     }
     return Boolean(this.state.frames[frameIndex]);
+  }
+
+  hasTimelineCellFrame(frameIndex: number): boolean {
+    if (!this.isLayerMode()) return this.hasCellFrame(frameIndex);
+    const layer = this.getActiveLayer();
+    return frameIndex >= 0
+      && frameIndex < this.state.timelineConfig.durationFrames
+      && Boolean(layer && this.getContentFrameAtTime(layer, frameIndex));
   }
 
   private setCellsInData(

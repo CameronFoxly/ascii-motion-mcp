@@ -43,6 +43,8 @@ export interface BrowserCommand {
   [key: string]: unknown;
 }
 
+export type BrowserCommandFactory = () => BrowserCommand | Promise<BrowserCommand>;
+
 export interface BrowserCommandRequest {
   type: 'command_request';
   requestId: string;
@@ -76,6 +78,7 @@ interface PendingBrowserCommand {
   client?: WebSocket;
   timeout?: NodeJS.Timeout;
   afterAcknowledged?: BrowserCommandFinalizer;
+  prepareCommand?: BrowserCommandFactory;
   acknowledged?: boolean;
 }
 
@@ -370,6 +373,7 @@ export class WebSocketServerTransport {
     command: BrowserCommand,
     timeoutMs = 5000,
     afterAcknowledged?: BrowserCommandFinalizer,
+    prepareCommand?: BrowserCommandFactory,
   ): Promise<BrowserCommandResult> {
     if (this.requiresStateReconciliation) {
       throw new Error('Browser command channel requires reconnect and state reconciliation');
@@ -391,6 +395,7 @@ export class WebSocketServerTransport {
         resolve,
         reject,
         afterAcknowledged,
+        prepareCommand,
       });
       this.dispatchNextBrowserCommand();
     });
@@ -411,6 +416,7 @@ export class WebSocketServerTransport {
 
     const pending = this.commandQueue.shift()!;
     pending.client = client;
+    this.activeCommand = pending;
     pending.timeout = setTimeout(() => {
       if (this.activeCommand !== pending) return;
       this.quarantineBrowserCommandChannel(
@@ -418,7 +424,33 @@ export class WebSocketServerTransport {
         'Command acknowledgement timed out',
       );
     }, pending.timeoutMs);
-    this.activeCommand = pending;
+
+    if (pending.prepareCommand) {
+      void Promise.resolve()
+        .then(() => pending.prepareCommand!())
+        .then(
+          command => {
+            if (this.activeCommand !== pending) return;
+            pending.request.command = command;
+            this.sendActiveBrowserCommand(pending, client);
+          },
+          error => this.finishActiveBrowserCommand(
+            error instanceof Error ? error : new Error(String(error)),
+            undefined,
+            pending,
+          ),
+        );
+      return;
+    }
+
+    this.sendActiveBrowserCommand(pending, client);
+  }
+
+  private sendActiveBrowserCommand(
+    pending: PendingBrowserCommand,
+    client: WebSocket,
+  ): void {
+    if (this.activeCommand !== pending) return;
 
     try {
       client.send(JSON.stringify(pending.request), error => {
@@ -465,7 +497,9 @@ export class WebSocketServerTransport {
       return;
     }
 
-    void Promise.resolve(pending.afterAcknowledged(result)).then(
+    void Promise.resolve().then(
+      () => pending.afterAcknowledged!(result),
+    ).then(
       () => this.finishActiveBrowserCommand(undefined, result, pending),
       error => this.quarantineBrowserCommandChannel(
         error instanceof Error ? error.message : String(error),
@@ -612,7 +646,13 @@ export class HybridTransport {
     command: BrowserCommand,
     timeoutMs = 5000,
     afterAcknowledged?: BrowserCommandFinalizer,
+    prepareCommand?: BrowserCommandFactory,
   ): Promise<BrowserCommandResult> {
-    return this.wsTransport.requestBrowserCommand(command, timeoutMs, afterAcknowledged);
+    return this.wsTransport.requestBrowserCommand(
+      command,
+      timeoutMs,
+      afterAcknowledged,
+      prepareCommand,
+    );
   }
 }

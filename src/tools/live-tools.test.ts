@@ -234,7 +234,7 @@ describe('acknowledged live tools', () => {
     });
   });
 
-  it('targets an explicit layer timeline frame without navigating locally', async () => {
+  it('targets an explicit content-frame ordinal without navigating locally', async () => {
     const pm = getProjectManager();
     pm.loadFromUnknownSessionData(v2Project);
     let command: BrowserCommand | undefined;
@@ -270,6 +270,51 @@ describe('acknowledged live tools', () => {
     });
   });
 
+  it('targets an explicit content-frame ordinal locally with non-unit durations', async () => {
+    const pm = getProjectManager();
+    pm.loadFromUnknownSessionData({
+      ...v2Project,
+      timeline: {
+        ...v2Project.timeline,
+        durationFrames: 6,
+      },
+      layers: [{
+        ...v2Project.layers[0],
+        contentFrames: [
+          {
+            ...v2Project.layers[0].contentFrames[0],
+            durationFrames: 5,
+          },
+          {
+            ...v2Project.layers[0].contentFrames[1],
+            startFrame: 5,
+          },
+        ],
+      }],
+    });
+
+    const applied = await applyExactCellChanges({
+      projectManager: pm,
+      frameIndex: 1,
+      cells: [{
+        x: 2,
+        y: 1,
+        cell: { char: 'T', color: '#FFFFFF', bgColor: 'transparent' },
+      }],
+    });
+
+    expect(pm.getState().currentFrameIndex).toBe(0);
+    expect(pm.getState().layers[0].contentFrames[0].data).not.toHaveProperty('2,1');
+    expect(pm.getState().layers[0].contentFrames[1].data).toMatchObject({
+      '2,1': { char: 'T' },
+    });
+    expect(applied).toMatchObject({
+      browserSynced: false,
+      frameIndex: 1,
+      cellsChanged: 1,
+    });
+  });
+
   it('refreshes fill state first and sends exact empty cells for clear operations', async () => {
     const pm = getProjectManager();
     let refreshed = false;
@@ -290,9 +335,9 @@ describe('acknowledged live tools', () => {
       ]);
       return true;
     });
-    setBrowserCommandCallback(async nextCommand => {
+    setBrowserCommandCallback(async (nextCommand, _timeoutMs, _afterAcknowledged, prepareCommand) => {
+      command = prepareCommand ? await prepareCommand() : nextCommand;
       expect(refreshed).toBe(true);
-      command = nextCommand;
       return result({ currentFrameIndex: 0, cellsChanged: 2 });
     });
 
@@ -311,7 +356,6 @@ describe('acknowledged live tools', () => {
 
     expect(command).toEqual({
       type: 'set_cells_batch',
-      frameIndex: 0,
       cells: [
         {
           x: 0,

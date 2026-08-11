@@ -8,6 +8,7 @@ export { WebSocketServerTransport, HybridTransport } from './websocket.js';
 export type {
   BrowserCommand,
   BrowserCommandApplied,
+  BrowserCommandFactory,
   BrowserCommandFinalizer,
   BrowserCommandRequest,
   BrowserCommandResult,

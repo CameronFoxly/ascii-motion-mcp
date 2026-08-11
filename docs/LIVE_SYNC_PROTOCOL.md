@@ -49,13 +49,13 @@ times out, or fails because the connection closes. This makes the browser's
 applied order equal to the server's enqueue order.
 
 The default acknowledgement timeout is 5 seconds and begins when a queued
-command is dispatched to the browser. A timeout is indeterminate because the
-browser may still apply that command after the server stops waiting. The
-server therefore rejects the entire queue, closes the browser connection, and
-does not accept another mutation until a reconnected browser sends a fresh
-state snapshot. Browser disconnect during an in-flight command follows the
-same quarantine behavior. Transport shutdown also rejects and removes both
-the in-flight request and every queued request.
+command reaches the FIFO head, including any dispatch-time command preparation.
+A timeout is indeterminate because the browser may still apply that command
+after the server stops waiting. The server therefore rejects the entire queue,
+closes the browser connection, and does not accept another mutation until a
+reconnected browser sends a fresh state snapshot. Browser disconnect during an
+in-flight command follows the same quarantine behavior. Transport shutdown
+also rejects and removes both the in-flight request and every queued request.
 
 A tool may report live success only after a matching result with
 `success: true`. The following conditions are MCP tool errors and do not
@@ -107,10 +107,11 @@ Clears use the exact empty cell value:
 { char: ' ', color: '#FFFFFF', bgColor: 'transparent' }
 ```
 
-An explicit `frameIndex` targets that frame without navigating. When
-`frameIndex` is omitted, the browser resolves the current frame when the
-command reaches the FIFO queue head. The browser should return
-`applied.currentFrameIndex` so the MCP mirror can update the same target.
+An explicit `frameIndex` targets that active-layer content-frame entry without
+navigating. When `frameIndex` is omitted, the browser resolves the current
+timeline/playhead position when the command reaches the FIFO queue head. The
+browser returns that timeline position in `applied.currentFrameIndex` so the MCP
+mirror can update the same target.
 
 `set_frame_rate` preserves the number of timeline frames and changes playback
 speed only. `set_frame_duration` may be quantized or cause timeline reflow;
