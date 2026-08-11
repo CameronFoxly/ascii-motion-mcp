@@ -7,8 +7,12 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
-import { requestBrowserCommand } from '../live-sync.js';
+import {
+  hasBrowserCommandCallback,
+  requestBrowserCommand,
+} from '../live-sync.js';
 import { ensureFreshBrowserState } from '../state.js';
+import type { BrowserCommandResult } from '../transport/websocket.js';
 
 export function registerFrameTools(server: McpServer): void {
   // ==========================================================================
@@ -236,27 +240,98 @@ export function registerFrameTools(server: McpServer): void {
     async ({ index }) => {
       const pm = getProjectManager();
       const state = pm.getState();
+      const navigationFrameCount = pm.isLayerMode()
+        ? state.timelineConfig.durationFrames
+        : state.frames.length;
       
-      if (index < 0 || index >= state.frames.length) {
+      if (index < 0 || index >= navigationFrameCount) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Frame index ${index} out of range (0-${state.frames.length - 1})` }) }],
+          content: [{ type: 'text', text: JSON.stringify({ error: `Frame index ${index} out of range (0-${navigationFrameCount - 1})` }) }],
           isError: true,
         };
       }
       
-      const success = pm.goToFrame(index);
-      const frame = pm.getCurrentFrame();
+      let commandResult;
+      let reconciled = false;
+      const reconcileNavigation = (result: BrowserCommandResult): void => {
+        const appliedFrameIndex = result.applied?.currentFrameIndex;
+        if (
+          typeof appliedFrameIndex !== 'number'
+          || !Number.isInteger(appliedFrameIndex)
+          || !pm.goToFrame(appliedFrameIndex)
+        ) {
+          throw new Error('Browser did not confirm a valid applied frame index for go_to_frame');
+        }
+
+        reconciled = true;
+        if (appliedFrameIndex !== index) {
+          throw new Error(
+            `Browser applied frame index ${appliedFrameIndex} instead of requested index ${index}`,
+          );
+        }
+      };
       
-      // Broadcast frame change
-      broadcastStateChange('go_to_frame', { index });
+      try {
+        if (!hasBrowserCommandCallback()) {
+          if (!pm.goToFrame(index)) {
+            throw new Error(`Failed to navigate to frame index ${index}`);
+          }
+          commandResult = null;
+        } else {
+          commandResult = await requestBrowserCommand(
+            { type: 'go_to_frame', index },
+            undefined,
+            reconcileNavigation,
+          );
+          if (commandResult === null) {
+            throw new Error('Browser command callback was removed during frame navigation');
+          }
+        }
+        if (commandResult !== null && !reconciled) {
+          reconcileNavigation(commandResult);
+        }
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      const appliedFrameIndex = pm.getState().currentFrameIndex;
+      const activeContentFrame = pm.isLayerMode()
+        ? pm.getActiveContentFrame()
+        : null;
+      const frame = activeContentFrame
+        ? {
+            id: activeContentFrame.id,
+            name: activeContentFrame.name,
+            duration: activeContentFrame.durationFrames
+              * (1000 / pm.getState().timelineConfig.frameRate),
+            data: activeContentFrame.data,
+          }
+        : pm.isLayerMode()
+          ? {
+              id: null,
+              name: `Timeline Frame ${appliedFrameIndex + 1}`,
+              duration: 1000 / pm.getState().timelineConfig.frameRate,
+              data: {},
+            }
+          : pm.getCurrentFrame();
       
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({
-            success,
+            success: true,
+            browserSynced: commandResult !== null,
             currentFrame: {
-              index,
+              index: appliedFrameIndex,
               id: frame.id,
               name: frame.name,
               duration: frame.duration,

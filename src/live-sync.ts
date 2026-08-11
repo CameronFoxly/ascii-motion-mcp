@@ -6,6 +6,7 @@ import {
 import type { Cell } from './types.js';
 import type {
   BrowserCommand,
+  BrowserCommandFactory,
   BrowserCommandFinalizer,
   BrowserCommandResult,
 } from './transport/websocket.js';
@@ -14,6 +15,7 @@ export type BrowserCommandCallback = (
   command: BrowserCommand,
   timeoutMs?: number,
   afterAcknowledged?: BrowserCommandFinalizer,
+  prepareCommand?: BrowserCommandFactory,
 ) => Promise<BrowserCommandResult>;
 
 export interface ExactCellChange {
@@ -23,10 +25,11 @@ export interface ExactCellChange {
 }
 
 export interface ApplyExactCellChangesOptions {
-  cells: ExactCellChange[];
+  cells: ExactCellChange[] | (() => ExactCellChange[]);
   frameIndex?: number;
   timeoutMs?: number;
   projectManager?: ProjectStateManager;
+  beforePrepare?: () => unknown | Promise<unknown>;
 }
 
 export interface ApplyExactCellChangesResult {
@@ -55,12 +58,14 @@ export async function requestBrowserCommand(
   command: BrowserCommand,
   timeoutMs?: number,
   afterAcknowledged?: BrowserCommandFinalizer,
+  prepareCommand?: BrowserCommandFactory,
 ): Promise<BrowserCommandResult | null> {
   if (!browserCommandCallback) return null;
   const result = await browserCommandCallback(
     command,
     timeoutMs,
     afterAcknowledged,
+    prepareCommand,
   );
   if (!result.success) {
     throw new Error(result.error || `Browser rejected command "${command.type}"`);
@@ -88,34 +93,103 @@ export async function applyExactCellChanges({
   frameIndex,
   timeoutMs,
   projectManager = getProjectManager(),
+  beforePrepare,
 }: ApplyExactCellChangesOptions): Promise<ApplyExactCellChangesResult> {
   if (frameIndex !== undefined && !projectManager.hasCellFrame(frameIndex)) {
     throw new Error(`Frame index ${frameIndex} out of range`);
   }
 
+  const cellFactory = typeof cells === 'function' ? cells : undefined;
+  let resolvedCells: ExactCellChange[] | undefined = Array.isArray(cells)
+    ? cells
+    : undefined;
+  let prepared = false;
+  const resolveCells = (): ExactCellChange[] => {
+    resolvedCells ??= cellFactory!();
+    return resolvedCells;
+  };
   const command: BrowserCommand = {
     type: 'set_cells_batch',
-    cells,
+    cells: resolvedCells ?? [],
     ...(frameIndex === undefined ? {} : { frameIndex }),
   };
-  const result = await requestBrowserCommand(command, timeoutMs);
-  const resolvedFrameIndex = frameIndex
-    ?? result?.applied?.currentFrameIndex
-    ?? projectManager.getState().currentFrameIndex;
+  let resolvedFrameIndex = frameIndex ?? projectManager.getState().currentFrameIndex;
+  let localCount = 0;
+  let reconciled = false;
 
-  let localCount: number;
-  if (frameIndex !== undefined) {
-    localCount = projectManager.setCellsOnFrame(frameIndex, cells);
-  } else if (result?.applied?.currentFrameIndex !== undefined) {
-    localCount = projectManager.setCellsAtTimelineFrame(result.applied.currentFrameIndex, cells);
-  } else {
-    localCount = projectManager.setCells(cells);
+  if (!browserCommandCallback) {
+    localCount = frameIndex === undefined
+      ? projectManager.setCellsAtTimelineFrame(resolvedFrameIndex, resolveCells())
+      : projectManager.setCellsOnFrame(frameIndex, resolveCells());
+    return {
+      browserSynced: false,
+      frameIndex: resolvedFrameIndex,
+      cellsChanged: localCount,
+    };
+  }
+
+  const reconcile = (acknowledgement: BrowserCommandResult): void => {
+    if (reconciled) return;
+
+    if (frameIndex !== undefined) {
+      resolvedFrameIndex = frameIndex;
+      localCount = projectManager.setCellsOnFrame(frameIndex, resolveCells());
+    } else {
+      const appliedFrameIndex = acknowledgement.applied?.currentFrameIndex;
+      if (
+        typeof appliedFrameIndex !== 'number'
+        || !Number.isInteger(appliedFrameIndex)
+        || !projectManager.hasTimelineCellFrame(appliedFrameIndex)
+      ) {
+        throw new Error(
+          'Browser did not confirm a valid applied frame index for set_cells_batch',
+        );
+      }
+      resolvedFrameIndex = appliedFrameIndex;
+      localCount = projectManager.setCellsAtTimelineFrame(
+        appliedFrameIndex,
+        resolveCells(),
+      );
+    }
+
+    reconciled = true;
+  };
+
+  const prepareCommand = cellFactory || beforePrepare
+    ? async () => {
+        if (!prepared) {
+          await beforePrepare?.();
+          prepared = true;
+        }
+        return {
+          type: 'set_cells_batch',
+          cells: resolveCells(),
+          ...(frameIndex === undefined ? {} : { frameIndex }),
+        };
+      }
+    : undefined;
+  const result = await requestBrowserCommand(
+    command,
+    timeoutMs,
+    reconcile,
+    prepareCommand,
+  );
+  if (result === null) {
+    throw new Error('Browser command callback was removed while applying cell changes');
+  }
+  if (!reconciled) {
+    // Test and alternate callback implementations may not run the transport finalizer.
+    if (!prepared) {
+      await beforePrepare?.();
+      prepared = true;
+    }
+    reconcile(result);
   }
 
   return {
-    browserSynced: result !== null,
+    browserSynced: true,
     frameIndex: resolvedFrameIndex,
     cellsChanged: result?.applied?.cellsChanged ?? localCount,
-    result: result ?? undefined,
+    result,
   };
 }

@@ -210,11 +210,12 @@ async function main(): Promise<void> {
     setWebSocketBroadcaster((type, data) => {
       hybridTransport?.broadcastStateChange(type, data);
     });
-    setBrowserCommandCallback((command, timeoutMs, afterAcknowledged) => {
+    setBrowserCommandCallback((command, timeoutMs, afterAcknowledged, prepareCommand) => {
       return hybridTransport!.requestBrowserCommand(
         command,
         timeoutMs,
         afterAcknowledged,
+        prepareCommand,
       );
     });
 

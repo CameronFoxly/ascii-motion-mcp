@@ -6,10 +6,28 @@
 
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getProjectManager, broadcastStateChange } from '../state.js';
+import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
-import { isInBounds } from '../types.js';
-import { applyExactCellChanges, requireFreshBrowserState } from '../live-sync.js';
+import { isInBounds, type Cell } from '../types.js';
+import {
+  applyExactCellChanges,
+  hasBrowserCommandCallback,
+  requestBrowserCommand,
+  requireFreshBrowserState,
+} from '../live-sync.js';
+
+function mutationErrorResponse(error: unknown) {
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    }],
+    isError: true as const,
+  };
+}
 
 export function registerCanvasTools(server: McpServer): void {
   // ==========================================================================
@@ -77,30 +95,42 @@ export function registerCanvasTools(server: McpServer): void {
     },
     async ({ x, y, char, color, bgColor }) => {
       const pm = getProjectManager();
-      const state = pm.getState();
       
-      if (!isInBounds(x, y, state.width, state.height)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Coordinates (${x}, ${y}) out of bounds` }) }],
-          isError: true,
-        };
+      let newCell: Cell | undefined;
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          cells: () => {
+            const state = pm.getState();
+            if (!isInBounds(x, y, state.width, state.height)) {
+              throw new Error(`Coordinates (${x}, ${y}) out of bounds`);
+            }
+            const currentCell = pm.getCell(x, y);
+            newCell = {
+              char: char ?? currentCell.char,
+              color: color ?? currentCell.color,
+              bgColor: bgColor ?? currentCell.bgColor,
+            };
+            return [{ x, y, cell: newCell }];
+          },
+        });
+      } catch (error) {
+        return mutationErrorResponse(error);
       }
       
-      // Get current cell and merge with new values
-      const currentCell = pm.getCell(x, y);
-      const newCell = {
-        char: char ?? currentCell.char,
-        color: color ?? currentCell.color,
-        bgColor: bgColor ?? currentCell.bgColor,
-      };
-      
-      pm.setCell(x, y, newCell);
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('set_cell', { x, y, cell: newCell });
-      
       return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, x, y, cell: newCell }) }],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
+            x,
+            y,
+            cell: newCell,
+          }),
+        }],
       };
     }
   );
@@ -117,22 +147,38 @@ export function registerCanvasTools(server: McpServer): void {
     },
     async ({ x, y }) => {
       const pm = getProjectManager();
-      const state = pm.getState();
       
-      if (!isInBounds(x, y, state.width, state.height)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Coordinates (${x}, ${y}) out of bounds` }) }],
-          isError: true,
-        };
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          cells: () => {
+            const state = pm.getState();
+            if (!isInBounds(x, y, state.width, state.height)) {
+              throw new Error(`Coordinates (${x}, ${y}) out of bounds`);
+            }
+            return [{
+              x,
+              y,
+              cell: { char: ' ', color: '#FFFFFF', bgColor: 'transparent' },
+            }];
+          },
+        });
+      } catch (error) {
+        return mutationErrorResponse(error);
       }
       
-      pm.clearCell(x, y);
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('clear_cell', { x, y });
-      
       return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, x, y }) }],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
+            x,
+            y,
+          }),
+        }],
       };
     }
   );
@@ -161,40 +207,56 @@ export function registerCanvasTools(server: McpServer): void {
         };
       }
       const pm = getProjectManager();
-      const state = pm.getState();
       
-      const toSet: Array<{ x: number; y: number; cell: { char: string; color: string; bgColor: string } }> = [];
+      const validCells: Array<{
+        x: number;
+        y: number;
+        char?: string;
+        color?: string;
+        bgColor?: string;
+      }> = [];
       const errors: string[] = [];
       
-      for (const { x, y, char, color, bgColor } of cells) {
-        if (!isInBounds(x, y, state.width, state.height)) {
-          errors.push(`(${x}, ${y}) out of bounds`);
-          continue;
-        }
-        
-        const currentCell = pm.getCell(x, y);
-        toSet.push({
-          x,
-          y,
-          cell: {
-            char: char ?? currentCell.char,
-            color: color ?? currentCell.color,
-            bgColor: bgColor ?? currentCell.bgColor,
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          cells: () => {
+            const state = pm.getState();
+            for (const cell of cells) {
+              const { x, y } = cell;
+              if (!isInBounds(x, y, state.width, state.height)) {
+                errors.push(`(${x}, ${y}) out of bounds`);
+                continue;
+              }
+              validCells.push(cell);
+            }
+            return validCells.map(({ x, y, char, color, bgColor }) => {
+              const currentCell = pm.getCell(x, y);
+              return {
+                x,
+                y,
+                cell: {
+                  char: char ?? currentCell.char,
+                  color: color ?? currentCell.color,
+                  bgColor: bgColor ?? currentCell.bgColor,
+                },
+              };
+            });
           },
         });
+      } catch (error) {
+        return mutationErrorResponse(error);
       }
-      
-      const count = pm.setCells(toSet);
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('set_cells_batch', { cells: toSet });
       
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({ 
-            success: true, 
-            cellsSet: count,
+            success: true,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
+            cellsSet: applied.cellsChanged,
             errors: errors.length > 0 ? errors : undefined,
           }) 
         }],
@@ -218,52 +280,61 @@ export function registerCanvasTools(server: McpServer): void {
     },
     async ({ text, x, y, color, bgColor, preserveSpaces }) => {
       const pm = getProjectManager();
-      const state = pm.getState();
       
       const lines = text.split('\n');
       const toSet: Array<{ x: number; y: number; cell: { char: string; color: string; bgColor: string } }> = [];
       let charsPasted = 0;
       let charsSkipped = 0;
       
-      for (let row = 0; row < lines.length; row++) {
-        const line = lines[row];
-        for (let col = 0; col < line.length; col++) {
-          const char = line[col];
-          const cellX = x + col;
-          const cellY = y + row;
-          
-          if (!isInBounds(cellX, cellY, state.width, state.height)) {
-            charsSkipped++;
-            continue;
-          }
-          
-          // Skip spaces unless preserveSpaces is true
-          if (char === ' ' && !preserveSpaces) {
-            continue;
-          }
-          
-          toSet.push({
-            x: cellX,
-            y: cellY,
-            cell: { char, color, bgColor },
-          });
-          charsPasted++;
-        }
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          cells: () => {
+            const state = pm.getState();
+            for (let row = 0; row < lines.length; row++) {
+              const line = lines[row];
+              for (let col = 0; col < line.length; col++) {
+                const char = line[col];
+                const cellX = x + col;
+                const cellY = y + row;
+
+                if (!isInBounds(cellX, cellY, state.width, state.height)) {
+                  charsSkipped++;
+                  continue;
+                }
+
+                // Skip spaces unless preserveSpaces is true
+                if (char === ' ' && !preserveSpaces) {
+                  continue;
+                }
+
+                toSet.push({
+                  x: cellX,
+                  y: cellY,
+                  cell: { char, color, bgColor },
+                });
+                charsPasted++;
+              }
+            }
+            return toSet;
+          },
+        });
+      } catch (error) {
+        return mutationErrorResponse(error);
       }
-      
-      pm.setCells(toSet);
-      
-      // Broadcast the paste operation to sync with browser
-      broadcastStateChange('set_cells_batch', { cells: toSet });
       
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({ 
             success: true,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
             lines: lines.length,
             maxWidth: Math.max(...lines.map(l => l.length)),
             charsPasted,
+            cellsChanged: applied.cellsChanged,
             charsSkipped,
           }) 
         }],
@@ -289,57 +360,30 @@ export function registerCanvasTools(server: McpServer): void {
       matchBgColor: z.boolean().default(false).describe('Only fill cells that match the starting cell background'),
     },
     async ({ x, y, char, color, bgColor, contiguous, matchChar, matchColor, matchBgColor }) => {
-      try {
-        await requireFreshBrowserState();
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          }],
-          isError: true,
-        };
-      }
-
       const pm = getProjectManager();
-      const state = pm.getState();
-      
-      if (!isInBounds(x, y, state.width, state.height)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Starting position (${x}, ${y}) out of bounds` }) }],
-          isError: true,
-        };
-      }
       
       const fillCell = { char, color, bgColor };
-      const cells = pm.planFillRegion(x, y, fillCell, {
-        contiguous,
-        matchChar,
-        matchColor,
-        matchBgColor,
-      });
 
       let applied;
       try {
         applied = await applyExactCellChanges({
           projectManager: pm,
-          frameIndex: state.currentFrameIndex,
-          cells,
+          beforePrepare: requireFreshBrowserState,
+          cells: () => {
+            const state = pm.getState();
+            if (!isInBounds(x, y, state.width, state.height)) {
+              throw new Error(`Starting position (${x}, ${y}) out of bounds`);
+            }
+            return pm.planFillRegion(x, y, fillCell, {
+              contiguous,
+              matchChar,
+              matchColor,
+              matchBgColor,
+            });
+          },
         });
       } catch (error) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          }],
-          isError: true,
-        };
+        return mutationErrorResponse(error);
       }
       
       return {
@@ -371,11 +415,34 @@ export function registerCanvasTools(server: McpServer): void {
       const previousState = pm.getState();
       const previousWidth = previousState.width;
       const previousHeight = previousState.height;
-      
-      pm.resizeCanvas(width, height);
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('resize_canvas', { width, height });
+      let commandResult;
+      let reconciled = false;
+      const reconcileResize = (): void => {
+        if (reconciled) return;
+        pm.resizeCanvas(width, height);
+        reconciled = true;
+      };
+
+      try {
+        if (!hasBrowserCommandCallback()) {
+          reconcileResize();
+          commandResult = null;
+        } else {
+          commandResult = await requestBrowserCommand(
+            { type: 'resize_canvas', width, height },
+            undefined,
+            reconcileResize,
+          );
+          if (commandResult === null) {
+            throw new Error('Browser command callback was removed during canvas resize');
+          }
+        }
+        if (commandResult !== null && !reconciled) {
+          reconcileResize();
+        }
+      } catch (error) {
+        return mutationErrorResponse(error);
+      }
       
       const newState = pm.getState();
       
@@ -384,6 +451,7 @@ export function registerCanvasTools(server: McpServer): void {
           type: 'text', 
           text: JSON.stringify({ 
             success: true,
+            browserSynced: commandResult !== null,
             previousSize: { width: previousWidth, height: previousHeight },
             newSize: { width: newState.width, height: newState.height },
           }) 
@@ -401,19 +469,37 @@ export function registerCanvasTools(server: McpServer): void {
     {},
     async () => {
       const pm = getProjectManager();
-      const previousCellCount = Object.keys(pm.getCurrentFrame().data).length;
-      
-      pm.clearCanvas();
-      
-      // Broadcast state change to connected browsers
-      broadcastStateChange('clear_canvas', {});
+      let applied;
+      try {
+        applied = await applyExactCellChanges({
+          projectManager: pm,
+          beforePrepare: requireFreshBrowserState,
+          cells: () => {
+            const data = pm.isLayerMode()
+              ? (pm.getActiveContentFrame()?.data ?? {})
+              : pm.getCurrentFrame().data;
+            return Object.keys(data).map(key => {
+              const [x, y] = key.split(',').map(Number);
+              return {
+                x,
+                y,
+                cell: { char: ' ', color: '#FFFFFF', bgColor: 'transparent' },
+              };
+            });
+          },
+        });
+      } catch (error) {
+        return mutationErrorResponse(error);
+      }
       
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({ 
             success: true,
-            cellsCleared: previousCellCount,
+            browserSynced: applied.browserSynced,
+            frameIndex: applied.frameIndex,
+            cellsCleared: applied.cellsChanged,
           }) 
         }],
       };
