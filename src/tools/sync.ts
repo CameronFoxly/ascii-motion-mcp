@@ -5,10 +5,10 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
-import { parseCellKey, type Cell } from '../types.js';
+import { differencePage } from '../cell-diff.js';
 
 // State request callback - will be set by index.ts
 let requestBrowserStateCallback: (() => Promise<boolean>) | null = null;
@@ -94,73 +94,45 @@ export function registerSyncTools(server: McpServer): void {
       frameA: z.number().int().describe('Index of first frame'),
       frameB: z.number().int().describe('Index of second frame'),
       showUnchanged: z.boolean().optional().default(false).describe('Include unchanged cells in output'),
+      maxCells: z.number().int().min(1).max(500).default(50).describe('Maximum cells per page'),
+      offset: z.number().int().min(0).default(0).describe('Continue from the previous nextOffset'),
     },
-    async ({ frameA, frameB, showUnchanged }) => {
+    async ({ frameA, frameB, showUnchanged, maxCells = 50, offset = 0 }) => {
       await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
 
-      if (frameA < 0 || frameA >= state.frames.length) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameA < 0 || frameA >= frameCount) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: `Frame ${frameA} does not exist` }) }],
           isError: true,
         };
       }
-      if (frameB < 0 || frameB >= state.frames.length) {
+      if (frameB < 0 || frameB >= frameCount) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: `Frame ${frameB} does not exist` }) }],
           isError: true,
         };
       }
 
-      const dataA = state.frames[frameA].data;
-      const dataB = state.frames[frameB].data;
-
-      const allKeys = new Set([...Object.keys(dataA), ...Object.keys(dataB)]);
-      
-      const added: Array<{ x: number; y: number; cell: Cell }> = [];
-      const removed: Array<{ x: number; y: number; cell: Cell }> = [];
-      const changed: Array<{ x: number; y: number; from: Cell; to: Cell }> = [];
-      const unchanged: Array<{ x: number; y: number; cell: Cell }> = [];
-
-      for (const key of allKeys) {
-        const { x, y } = parseCellKey(key);
-        const cellA = dataA[key] as Cell | undefined;
-        const cellB = dataB[key] as Cell | undefined;
-
-        if (!cellA && cellB) {
-          added.push({ x, y, cell: cellB });
-        } else if (cellA && !cellB) {
-          removed.push({ x, y, cell: cellA });
-        } else if (cellA && cellB) {
-          if (cellA.char !== cellB.char || cellA.color !== cellB.color || cellA.bgColor !== cellB.bgColor) {
-            changed.push({ x, y, from: cellA, to: cellB });
-          } else if (showUnchanged) {
-            unchanged.push({ x, y, cell: cellA });
-          }
-        }
-      }
-
-      const result: Record<string, unknown> = {
-        frameA: { index: frameA, name: state.frames[frameA].name },
-        frameB: { index: frameB, name: state.frames[frameB].name },
-        summary: {
-          added: added.length,
-          removed: removed.length,
-          changed: changed.length,
-          unchanged: showUnchanged ? unchanged.length : undefined,
-        },
-        added,
-        removed,
-        changed,
+      const first = pm.getFrameAtTime(frameA);
+      const second = pm.getFrameAtTime(frameB);
+      const page = differencePage(first.data, second.data, offset, maxCells, showUnchanged);
+      const { diffs, ...metadata } = page;
+      const result = {
+        frameA: { index: frameA, name: first.name },
+        frameB: { index: frameB, name: second.name },
+        ...metadata,
+        summary: { ...page.summary, changed: page.summary.modified },
+        added: diffs.filter(diff => diff.change === 'added').map(diff => ({ x: diff.x, y: diff.y, cell: diff.after })),
+        removed: diffs.filter(diff => diff.change === 'removed').map(diff => ({ x: diff.x, y: diff.y, cell: diff.before })),
+        changed: diffs.filter(diff => diff.change === 'modified').map(diff => ({ x: diff.x, y: diff.y, from: diff.before, to: diff.after })),
+        ...(showUnchanged ? { unchanged: diffs.filter(diff => diff.change === 'unchanged') } : {}),
       };
 
-      if (showUnchanged) {
-        result.unchanged = unchanged;
-      }
-
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(result) }],
       };
     }
   );

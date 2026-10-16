@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 import { type Cell } from '../types.js';
 import { assertActiveLayerAcceptsCells } from '../live-sync.js';
@@ -347,40 +347,27 @@ export function registerGeneratorTools(server: McpServer): void {
       
       // Apply frames to project
       if (replaceFrames) {
-        // Delete all existing frames except first
         while (state.frames.length > 1) {
-          pm.deleteFrame(1);
+          if (!pm.deleteFrame(1)) throw new Error('Cannot remove content from the active layer');
         }
-        // Clear first frame and use it for first generated frame
         if (frames.length > 0) {
-          pm.clearCanvas();
-          for (const [key, cell] of Object.entries(frames[0].data)) {
-            const [x, y] = key.split(',').map(Number);
-            pm.setCell(x, y, cell);
-          }
+          const first = state.frames[0] ?? pm.addFrame(undefined, {}, frameDuration);
+          first.data = structuredClone(frames[0].data);
+          pm.setFrameDuration(0, frameDuration);
           pm.setFrameName(0, frames[0].name);
         }
-        // Add remaining frames
         for (let i = 1; i < frames.length; i++) {
-          pm.addFrame(i, undefined, frameDuration);
-          pm.goToFrame(i);
-          for (const [key, cell] of Object.entries(frames[i].data)) {
-            const [x, y] = key.split(',').map(Number);
-            pm.setCell(x, y, cell);
-          }
+          const added = pm.addFrame(undefined, frames[i].data, frameDuration);
+          added.name = frames[i].name;
         }
       } else {
-        // Append frames
-        const startIdx = state.frames.length;
         for (let i = 0; i < frames.length; i++) {
-          pm.addFrame(i, undefined, frameDuration);
-          pm.goToFrame(startIdx + i);
-          for (const [key, cell] of Object.entries(frames[i].data)) {
-            const [x, y] = key.split(',').map(Number);
-            pm.setCell(x, y, cell);
-          }
+          const added = pm.addFrame(undefined, frames[i].data, frameDuration);
+          added.name = frames[i].name;
         }
       }
+      const last = pm.getActiveLayer()?.contentFrames.at(-1);
+      pm.goToFrame(last?.startFrame ?? pm.getState().frames.length - 1);
       
       // Broadcast generator completed
       broadcastStateChange('run_generator', { generator, framesGenerated: frames.length });

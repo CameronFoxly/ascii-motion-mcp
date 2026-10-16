@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '../mcp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyExactCellChanges, setBrowserCommandCallback } from '../live-sync.js';
 import { getProjectManager, resetProjectManager, setEnsureFreshStateCallback } from '../state.js';

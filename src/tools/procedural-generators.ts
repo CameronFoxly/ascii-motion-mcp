@@ -14,7 +14,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, ensureFreshBrowserState } from '../state.js';
 import { hasBrowserCommandCallback, requestBrowserCommand, requireFreshBrowserState } from '../live-sync.js';
 import type { BrowserCommand, BrowserCommandApplied } from '../transport/websocket.js';

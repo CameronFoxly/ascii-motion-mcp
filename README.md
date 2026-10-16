@@ -1,368 +1,206 @@
-# ASCII Motion MCP Server
+# ASCII Motion MCP
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables AI assistants to create, animate, and export ASCII art from the [ASCII Motion app](https://ascii-motion.app), using natural language.
+Create, animate and export ASCII art from an MCP-compatible assistant, using
+[ASCII Motion](https://ascii-motion.app) as the authoritative editor.
 
-![npm version](https://img.shields.io/npm/v/ascii-motion-mcp)
-![license](https://img.shields.io/npm/l/ascii-motion-mcp)
+> **Version 3 requires bridge v3.** `ascii-motion-mcp@3` pairs with
+> [ascii-motion.app](https://ascii-motion.app) 2.2.6 or later (bridge contract
+> `e76f9c34204f`). Check `get_capabilities` after connecting. Use
+> `ascii-motion-mcp@2.3.0` only with older app builds that lack v3 negotiation.
 
-## What is this?
+## Install and connect
 
-ASCII Motion MCP allows you to use AI assistants like Claude, GitHub Copilot, and Cursor to:
+Use Node.js 22 or 24. An MCP host starts the server; the browser connects to
+**that same process**. Do not start a second terminal instance to obtain a token.
 
-- 🎨 **Draw ASCII art** - Create pixel art and text graphics with characters
-- 🎬 **Animate** - Build frame-by-frame animations with onion skinning
-- 📥 **Import** - Convert images to ASCII art with full control
-- 📤 **Export** - Save as PNG, GIF, MP4, HTML, React, or CLI components
-- 🖥️ **Preview inline** - Render the live canvas as ANSI-colored terminal text
-- 🌈 **Apply effects** - Add digital rain, noise, color shifts, and more
+For a published release:
 
-All through natural language prompts!
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- An MCP-compatible AI client (Claude Desktop, VS Code + Copilot, Cursor, etc.)
-
-### Installation
-
-```bash
+```sh
 npm install -g ascii-motion-mcp
 ```
 
-Verify installation:
-```bash
-ascii-motion-mcp --help
+From a source checkout (for development):
+
+```sh
+npm ci
+npm run build
+node dist/index.js --help
 ```
 
-## Client Setup
+Configure the host with `command: "node"` and arguments
+`["/absolute/path/to/ascii-motion-mcp/dist/index.js", "--live", "--project-dir",
+"/absolute/path/to/projects"]`. A source build must match the app's bridge contract.
 
-> **Important:** The `--live` flag is required for all setups. Without it, the MCP tools have no visual output. After configuring your client, you must also connect the browser to see your AI's work.
+### GitHub Copilot app
 
-### Claude Desktop
+Open **Customize > MCP**, add a custom stdio server, and enter the command and
+arguments above. Manage it under **Installed**. For a published installation,
+the command can instead be `ascii-motion-mcp` with `--live --project-dir ...`.
 
-Add to your Claude Desktop config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "/path/to/your/projects"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop after saving.
-
-### VS Code with GitHub Copilot
-
-1. Install the [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot) extension
-
-2. Create `.vscode/mcp.json` in your workspace:
-
-```json
-{
-  "servers": {
-    "ascii-motion": {
-      "command": "npx",
-      "args": [
-        "ascii-motion-mcp",
-        "--live",
-        "--project-dir",
-        "${workspaceFolder}"
-      ],
-      "type": "stdio"
-    }
-  }
-}
-```
-
-Or if you've installed globally (`npm install -g ascii-motion-mcp`):
-
-```json
-{
-  "servers": {
-    "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": [
-        "--live",
-        "--project-dir",
-        "${workspaceFolder}"
-      ],
-      "type": "stdio"
-    }
-  }
-}
-```
-
-3. Restart VS Code completely (not just reload window)
-
-4. Open Copilot Chat - the MCP tools should now be available!
-
-> **Note:** VS Code spawns the MCP server automatically when Copilot needs it. You don't run the server manually.
-
-### Connect the Browser (Optional)
-
-To see edits in real-time:
-
-1. Ask Copilot: "What is the MCP auth token?"
-2. Open [ascii-motion.app](https://ascii-motion.app)
-3. Click ☰ → **MCP Connection**
-4. Paste the token and click **Connect**
+In the same Copilot conversation, call `get_auth_token` and
+`get_connection_status`. Open the app's **MCP Connection** dialog, enter that
+instance's token and port, and connect. Treat the token as a secret.
 
 ### GitHub Copilot CLI
 
-1. Install GitHub CLI and Copilot extension:
+Use the standalone `copilot` CLI, not the retired `gh copilot` extension:
 
-```bash
-# Install GitHub CLI
-brew install gh  # macOS
-# or: winget install GitHub.cli  # Windows
-
-# Install Copilot extension
-gh extension install github/gh-copilot
-
-# Login
-gh auth login
+```sh
+copilot mcp add ascii-motion -- node /absolute/path/to/ascii-motion-mcp/dist/index.js --live --project-dir /absolute/path/to/projects --port 9876
 ```
 
-2. Create/edit `~/.config/gh-copilot/config.yml`:
+The CLI's configuration is `~/.copilot/mcp-config.json`. Its `mcpServers` entries
+are not the same schema as VS Code's `servers` entries.
 
-```yaml
-mcpServers:
-  ascii-motion:
-    command: ascii-motion-mcp
-    args:
-      - --live
-      - --project-dir
-      - ~/ascii-art-projects
-```
+### VS Code with Copilot
 
-3. Use in terminal:
-
-```bash
-gh copilot chat "Create an 8-frame animation of a bouncing ball"
-```
-
-### Cursor
-
-1. Open Cursor Settings (`Cmd+,` / `Ctrl+,`)
-2. Search for "MCP" in settings
-3. Click "Edit in settings.json" and add:
+Create `.vscode/mcp.json`:
 
 ```json
 {
-  "mcp.servers": {
+  "servers": {
     "ascii-motion": {
-      "command": "ascii-motion-mcp",
-      "args": ["--live", "--project-dir", "/path/to/projects"]
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/absolute/path/to/ascii-motion-mcp/dist/index.js",
+        "--live",
+        "--project-dir",
+        "${workspaceFolder}"
+      ]
     }
   }
 }
 ```
 
-4. Restart Cursor
+For Claude Desktop, Cursor or Windsurf, add an equivalent stdio entry using the
+host's MCP settings. Claude Desktop and Windsurf use a top-level `mcpServers`
+object; Cursor uses its MCP configuration, not `mcp.servers` in generic editor
+settings. Restart or reload the server after changing its command.
 
-### Windsurf
+## Live and headless behavior
 
-Add to your Windsurf MCP configuration:
+In live mode, inputs and acknowledged results are validated against the
+app-owned contract. Reads sample the actual compositor at an absolute timeline
+frame, including transforms, generators and procedural effects. Raster shaders
+apply to rendered image/video exports, not character-cell reads.
 
-```json
-{
-  "mcpServers": {
-    "ascii-motion": {
-      "command": "ascii-motion-mcp", 
-      "args": ["--live", "--project-dir", "/path/to/projects"]
-    }
-  }
-}
+Mutations are ordered, revision-checked and applied by the app. A timeout,
+disconnect, invalid target or locked layer is an error, not a successful edit to
+a private server copy. Only one browser tab owns a connection. Reconnect and
+refresh after an indeterminate timeout before retrying a destructive action.
+
+Without `--live`, compatible document tools edit and save a local document.
+Headless mode does not recreate the app's compositor, shader renderer, media
+pipeline or cloud authentication. Native saves preserve layers, groups,
+typography, palettes, effects, shaders, generators and additive native fields.
+
+Compatibility corrections include integer frame rates of 1..60 (the app's
+actual range), motion-trails in the effect-block enum, and bounded preview/diff
+pagination. Existing names are retained, but obsolete ranges are not advertised
+as working against the current editor.
+
+Some old inputs cannot be represented by the current app. Connected groups
+require two distinct, ungrouped layers. OpenTUI exports **TypeScript/TSX**, not
+Python; use `componentName`, not `className`. The connected Bubble Tea exporter
+uses `modelName: "Model"`. HTML always includes controls and loops indefinitely,
+and JSON exports are sparse. Unsupported requests fail explicitly rather than
+silently dropping options.
+
+Connected legacy image/video imports use the app conversion pipeline, with
+top-left placement and the legacy dark-to-bright charset order preserved.
+Exact source-color backgrounds and the old brightness-dither
+options are not supported by this adapter. Use `import_media` and
+`get_catalog {family:"tools"}` for native palette mapping, conversion settings
+and video sampling windows. Legacy image import overlays non-empty cells,
+preserving unrelated artwork. Canonical `mode:"new_layer"`, `"replace"` and
+image-only `"overlay"` make the placement policy explicit.
+
+## Discover and work efficiently
+
+Start with `get_capabilities` and `get_document_summary`. Use `get_catalog` for
+current effect, shader, generator, palette, font, drawing and export options.
+`tools/list` is authoritative; there is no manually maintained tool-count table.
+Full typed discovery is larger than the old partial toolset. Use host-side
+progressive/tool-search discovery where available; response paging reduces
+result tokens, not the size of the initial tool schemas.
+
+Existing tool names remain compatibility entrypoints. Where a canonical app
+operation has the same name but different inputs, it is exposed with an `app_`
+prefix: for example, `load_project` reads a local file, while `app_load_project`
+accepts a session object. Prefer the stable-ID, explicit-target operation for
+new workflows.
+
+- All new `frame`, `startFrame` and `durationFrames` fields are zero-based
+  **timeline frames**, not milliseconds or array indices.
+- Address layers, content frames, effects, shaders and keyframes by their
+  returned IDs. Compatibility content-frame indices are ordinals.
+- Pass the revision returned by an authoritative read as `expectedRevision`
+  when a later canonical tool must not overwrite intervening UI edits.
+- Use scoped `read_cells`, `get_canvas_ascii` or `get_canvas_preview` before
+  editing. Use `get_canvas_render` for a bounded ANSI terminal preview.
+- Batch cells or independent mutations. `apply_operations` is atomic and
+  produces one undo entry; it rejects nested batches, history/project resets
+  and IO/cloud operations.
+- Default responses are bounded to 16 KiB. Full results and exports are saved
+  as artifacts instead of dumping large documents or base64 into the model.
+  Follow `nextOffset` with `read_artifact`; explicit artifact pages allow up to
+  8192 bytes and remain below the 64 KiB page-response ceiling.
+
+Artifacts are saved under the project directory, by default in
+`.ascii-motion/artifacts/`. Resource handles belong to the current server
+session; saved file paths remain usable after restarting.
+
+## Supported workflows
+
+The app contract covers drawing/brush/vector/Bezier/gradient/text/FIGlet/ASCII
+boxes; selection/clipboard/transforms; layer/group/content-frame editing;
+transform animation; effects and shaders; procedural generators; palettes;
+image/video import and trace overlays; native project files; and authenticated
+cloud project management.
+
+Use live export catalogs for options and availability. Formats include PNG,
+JPG, SVG, WebM, MP4, image sequences, native sessions, text, JSON, ANSI, HTML,
+React, Ink, OpenTUI and Bubbletea. **There is no GIF exporter.** MP4 and other
+media codecs depend on the browser. Cloud operations use the browser's signed-in
+account and enforce its actual entitlements; account/billing/admin actions are
+not MCP authoring tools.
+
+Examples:
+
+> Create a small project, inspect the active layer and content-frame IDs, and
+> draw a character graphic using one cell batch.
+
+> Add an Animated Text generator with a typewriter reveal, preview timeline
+> frame 12, then undo and redo the change.
+
+> Export a WebM artifact without triggering a browser download, and save the
+> complete native project in my project directory.
+
+## CLI
+
+```text
+ascii-motion-mcp [--live] [--project-dir PATH] [--port PORT]
+  --live                Enable the loopback browser bridge
+  --project-dir PATH    File-operation root (default: current directory)
+  --port PORT           Bridge port, 1..65535 (default: 9876)
+  --help                Show help
+  --version             Show the installed package version
 ```
 
-## Connect the Browser
+`ASCII_MOTION_PROJECT_DIR` also sets the file root. Files must stay within it,
+including through symlinks. A remote/cloud-hosted MCP process cannot reach your
+local browser merely because both use a loopback address.
 
-After configuring your AI client, you must connect the ASCII Motion browser app to see visual output:
+## Development
 
-1. **Get the auth token** - Ask your AI: "What is the MCP auth token?"
-2. **Open ASCII Motion** - Go to [ascii-motion.app](https://ascii-motion.app)
-3. **Open MCP Connection** - Click the hamburger menu (☰) → **MCP Connection**
-4. **Paste the token** - Enter the auth token and click **Connect**
+See [Contributing](CONTRIBUTING.md), [bridge protocol](docs/LIVE_SYNC_PROTOCOL.md),
+[updating](docs/UPDATING.md) and [release coordination](docs/PUBLISHING.md).
+The SDK serves both legacy initialization and modern MCP discovery over stdio.
+MCP Apps, resumable tasks and remote hosting are not required by this bridge and
+are not advertised as supported integrations.
 
-You should see a green "Connected" status. Now your AI's edits appear in real-time!
+[Published app documentation](https://docs.ascii-motion.com/mcp) lives in
+`Ascii-Motion-Web/docs-site`, mounted at `packages/web` in the app repository.
 
-### Live mutation acknowledgements
-
-Live-mode mutations that use the command channel are successful only after the
-browser acknowledges the matching request. Commands are sent one at a time in
-FIFO order:
-
-```ts
-// MCP server -> browser
-{
-  type: 'command_request',
-  requestId: string,
-  command: { type: string, ...payload }
-}
-
-// Browser -> MCP server
-{
-  type: 'command_result',
-  requestId: string,
-  success: boolean,
-  error?: string,
-  applied?: {
-    currentFrameIndex?: number,
-    cellsChanged?: number,
-    frameRate?: number,
-    durationMs?: number
-  }
-}
-```
-
-Browser rejection, timeout, send failure, or disconnect returns an MCP tool
-error instead of a success based only on server-side state. Exact cell edits
-are batched in one `set_cells_batch` command; an empty cell (`" "` with
-`#FFFFFF` and a transparent background) explicitly clears that coordinate.
-Without `--live`, the same tools update local MCP state and return
-`browserSynced: false` rather than implying that a browser changed.
-
-See [Live Browser Command Protocol](docs/LIVE_SYNC_PROTOCOL.md) for payload,
-ordering, timeout, and compatibility details.
-
-## CLI Options
-
-```
-ascii-motion-mcp [options]
-
-Options:
-  -d, --project-dir PATH  Project directory for file operations (default: cwd)
-  -l, --live              Enable live browser sync via WebSocket (REQUIRED)
-  -p, --port PORT         WebSocket port for live mode (default: 9876)
-  -h, --help              Show help
-  -v, --version           Show version
-```
-
-## Example Prompts
-
-Once configured, try these prompts with your AI assistant:
-
-**Create Art:**
-> "Create a 40x20 canvas with a pixel art heart in red"
-
-**Import & Convert:**
-> "Import the image at ./photo.jpg and convert it to ASCII using block characters"
-
-**Animate:**
-> "Create an 8-frame animation of a walking stick figure"
-
-**Apply Effects:**
-> "Add a digital rain effect with green characters"
-
-**Export:**
-> "Export this animation as a GIF with 2x size"
-
-**CLI Components:**
-> "Export as an Ink component for my Node.js CLI app"
-
-**Inline Terminal Preview:**
-> "Show the current canvas with get_canvas_render in truecolor at maxWidth 80"
-
-`get_canvas_render` returns raw ANSI text with actual escape bytes, ready for a terminal to print directly. It supports `colorMode` (`16`, `256`, or `truecolor`), `frameIndex` or `allFrames`, `maxWidth`, and `trimEmpty`. All-frame renders are limited to 24 frames and every response is capped at 1 MiB.
-
-## Available Tools (70 total)
-
-### Canvas Tools
-`set_cell`, `get_cell`, `clear_cell`, `set_cells_batch`, `paste_ascii_block`, `fill_region`, `resize_canvas`, `clear_canvas`
-
-### Frame Tools
-`add_frame`, `delete_frame`, `duplicate_frame`, `go_to_frame`, `list_frames`, `set_frame_duration`, `set_frame_name`
-
-### Animation Tools
-`copy_frame_and_modify`, `shift_frame_content`, `flip_region`, `copy_region_to_frame`, `interpolate_frames`
-
-### Project Tools
-`new_project`, `save_project`, `load_project`, `get_project_info`, `list_project_files`, `set_project_name`
-
-### Preview Tools
-`get_canvas_summary`, `get_canvas_preview`, `get_canvas_ascii`, `get_canvas_render`, `get_frame_diff`, `describe_animation`
-
-### Selection Tools
-`select_rectangle`, `select_by_color`, `get_selection`, `clear_selection`, `apply_to_selection`, `delete_selection_content`
-
-### Palette Tools
-`list_character_palettes`, `get_character_palette`, `list_color_palettes`, `get_color_palette`, `get_active_colors`, `set_foreground_color`, `set_background_color`, `set_selected_character`, `suggest_palette_for_style`
-
-### Import Tools
-`import_image`, `import_video`, `import_ascii_text`
-
-### Effects Tools
-`apply_effect`, `get_color_stats`, `batch_recolor`, `batch_replace_char`
-
-### Procedural Generator Layer Tools
-Live, keyframeable generator layers (requires Ascii-Motion 2.2.5+ for live mode): radio waves, turbulent noise, particle physics, rain drops, digital rain, and animated text.
-
-`list_generator_types`, `get_generator_layers`, `add_generator_layer`, `add_animated_text`, `update_generator_layer`, `set_generator_property`, `set_generator_keyframes`, `remove_generator_keyframes`, `reset_generator`, `randomize_generator_seed`, `render_generator_frames` (live), `bake_generator_layer` (live)
-
-Every generator property can be keyframed with easing. In headless mode, generator layers are created, edited, and saved (session format 2.2.0) but not rendered; connect Ascii-Motion for rendering, previews, and baking. The bundled catalog is regenerated from an Ascii-Motion checkout with `npx tsx scripts/sync-generator-catalog.mts <ascii-motion-path>` (run from that checkout).
-
-### Legacy Generator Tools
-`run_generator`, `preview_generator` — bake procedural frames into static cells.
-
-### Export Tools
-`export_text`, `export_json`, `export_session`, `export_html`, `export_react`, `export_ansi`, `export_ink`, `export_bubbletea`, `export_opentui`, `export_image`, `export_video`
-
-### History Tools
-`undo`, `redo`, `get_history_status`
-
-## MCP Resources
-
-The server exposes these resources for state introspection:
-
-- `project://state` - Full project state snapshot
-- `project://canvas` - Current frame canvas data
-- `project://frames` - Frame list with metadata
-- `project://selection` - Current selection state
-- `project://history` - Undo/redo history
-- `project://ascii` - Plain text ASCII preview
-
-## Requirements
-
-- **Node.js 18+** - Required
-- **sharp** (optional) - For image import: `npm install sharp`
-- **ffmpeg** (optional) - For video export: `brew install ffmpeg`
-
-## Troubleshooting
-
-### "Command not found"
-Make sure npm global bin is in your PATH:
-```bash
-npm bin -g
-# Add the output to your PATH if needed
-```
-
-### Tools not appearing
-Restart your AI client after configuration changes. Check that the config file is valid JSON.
-
-### Live mode not connecting
-- Ensure port 9876 is available
-- Check that you're connecting from localhost
-- Verify the auth token is correct
-
-### No visual output
-Make sure you're using the `--live` flag AND have connected the browser via MCP Connection.
-
-## Links
-
-- [ASCII Motion Web App](https://ascii-motion.app)
-- [Documentation](https://docs.ascii-motion.com/mcp)
-- [GitHub Issues](https://github.com/CameronFoxly/ascii-motion-mcp/issues)
-- [Discord Community](https://discord.gg/PVbpGgKQMy)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE).

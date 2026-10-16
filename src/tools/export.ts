@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey } from '../types.js';
@@ -227,34 +227,7 @@ export function registerExportTools(server: McpServer): void {
       const pm = getProjectManager();
       const state = pm.getState();
       
-      // Build SessionData format matching the app's expected structure
-      const sessionData = {
-        version: '1.0.0',
-        name: state.name,
-        canvas: {
-          width: state.width,
-          height: state.height,
-          canvasBackgroundColor: state.backgroundColor,
-          showGrid: true,
-        },
-        animation: {
-          frames: state.frames.map(frame => ({
-            id: frame.id,
-            name: frame.name,
-            duration: frame.duration,
-            // Convert to the app's expected format: Map serialized as object
-            data: frame.data,
-          })),
-          currentFrameIndex: state.currentFrameIndex,
-          frameRate: state.frameRate,
-          looping: state.looping,
-        },
-        tools: {
-          selectedColor: '#FFFFFF',
-          selectedBgColor: 'transparent',
-          selectedCharacter: '@',
-        },
-      };
+      const sessionData = pm.toNativeSessionData();
       
       const content = JSON.stringify(sessionData, null, 2);
       

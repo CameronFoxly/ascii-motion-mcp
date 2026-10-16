@@ -10,9 +10,10 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 import { parseCellKey, createCellKey, type Cell } from '../types.js';
+import { assertActiveLayerAcceptsCells } from '../live-sync.js';
 
 export function registerEffectsTools(server: McpServer): void {
   // ==========================================================================
@@ -61,9 +62,11 @@ export function registerEffectsTools(server: McpServer): void {
     }) => {
       const pm = getProjectManager();
       const state = pm.getState();
+      assertActiveLayerAcceptsCells(pm);
 
       const frameIdx = frameIndex ?? state.currentFrameIndex;
-      if (frameIdx < 0 || frameIdx >= state.frames.length) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameIdx < 0 || frameIdx >= frameCount) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Frame index out of range' }) }],
           isError: true,
@@ -71,7 +74,7 @@ export function registerEffectsTools(server: McpServer): void {
       }
 
       // Get cells to modify
-      const frame = state.frames[frameIdx];
+      const frame = pm.getFrameAtTime(frameIdx);
       let cellsToProcess: [string, Cell][] = Object.entries(frame.data);
 
       // Filter to selection if requested
@@ -214,10 +217,10 @@ export function registerEffectsTools(server: McpServer): void {
       if (effect === 'scatter' && scatterAmount) {
         const scatteredMods = scatterCells(modifications, scatterAmount, state.width, state.height);
 
-        // Apply scattered modifications
-        for (const mod of scatteredMods) {
-          pm.setCell(mod.x, mod.y, mod.cell);
-        }
+        pm.setCellsAtTimelineFrame(frameIdx, [
+          ...modifications.map(({ x, y }) => ({ x, y, cell: { char: ' ', color: '#FFFFFF', bgColor: 'transparent' } })),
+          ...scatteredMods,
+        ]);
 
         return {
           content: [{
@@ -232,10 +235,7 @@ export function registerEffectsTools(server: McpServer): void {
         };
       }
 
-      // Apply modifications
-      for (const mod of modifications) {
-        pm.setCell(mod.x, mod.y, mod.cell);
-      }
+      pm.setCellsAtTimelineFrame(frameIdx, modifications);
 
       // Broadcast effect applied
       broadcastStateChange('apply_effect', { effect, cellsModified: modifiedCount });
@@ -266,7 +266,7 @@ export function registerEffectsTools(server: McpServer): void {
       const pm = getProjectManager();
       const state = pm.getState();
 
-      const frame = state.frames[frameIndex ?? state.currentFrameIndex];
+      const frame = pm.getFrameAtTime(frameIndex ?? state.currentFrameIndex);
       if (!frame) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid frame index' }) }],
@@ -325,7 +325,7 @@ export function registerEffectsTools(server: McpServer): void {
       const state = pm.getState();
 
       const frameIdx = frameIndex ?? state.currentFrameIndex;
-      const frame = state.frames[frameIdx];
+      const frame = pm.getFrameAtTime(frameIdx);
 
       if (!frame) {
         return {
@@ -352,7 +352,7 @@ export function registerEffectsTools(server: McpServer): void {
         }
 
         if (modified) {
-          pm.setCell(x, y, newCell);
+          pm.setCellsAtTimelineFrame(frameIdx, [{ x, y, cell: newCell }]);
           replacedCount++;
         }
       }
@@ -389,7 +389,7 @@ export function registerEffectsTools(server: McpServer): void {
       const state = pm.getState();
 
       const frameIdx = frameIndex ?? state.currentFrameIndex;
-      const frame = state.frames[frameIdx];
+      const frame = pm.getFrameAtTime(frameIdx);
 
       if (!frame) {
         return {
@@ -403,7 +403,7 @@ export function registerEffectsTools(server: McpServer): void {
       for (const [key, cell] of Object.entries(frame.data)) {
         if (cell.char === oldChar) {
           const { x, y } = parseCellKey(key);
-          pm.setCell(x, y, { ...cell, char: newChar });
+          pm.setCellsAtTimelineFrame(frameIdx, [{ x, y, cell: { ...cell, char: newChar } }]);
           replacedCount++;
         }
       }
@@ -475,10 +475,10 @@ export function registerEffectsTools(server: McpServer): void {
   // ==========================================================================
   server.tool(
     'add_effect_block',
-    'Add a non-destructive procedural effect to a layer, group, or global effects. Available types: levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle.',
+    'Add a non-destructive procedural effect to a layer, group, or global effects. Available types: levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle, motion-trails.',
     {
       ownerId: z.string().nullable().describe('Layer or group ID to add effect to, or null for global effects'),
-      effectType: z.enum(['levels', 'hue-saturation', 'remap-colors', 'remap-characters', 'scatter', 'wave-warp', 'wiggle'])
+      effectType: z.enum(['levels', 'hue-saturation', 'remap-colors', 'remap-characters', 'scatter', 'wave-warp', 'wiggle', 'motion-trails'])
         .describe('Type of effect to add'),
       startFrame: z.number().int().min(0).optional().describe('Start frame (defaults to 0)'),
       durationFrames: z.number().int().min(1).optional().describe('Duration in frames (defaults to timeline duration)'),

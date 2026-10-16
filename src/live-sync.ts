@@ -1,6 +1,7 @@
 import {
   ensureFreshBrowserState,
   getProjectManager,
+  isLocalProjectContext,
   type ProjectStateManager,
 } from './state.js';
 import { isGeneratorLayer, type Cell } from './types.js';
@@ -46,7 +47,7 @@ export function setBrowserCommandCallback(callback: BrowserCommandCallback | nul
 }
 
 export function hasBrowserCommandCallback(): boolean {
-  return browserCommandCallback !== null;
+  return !isLocalProjectContext() && browserCommandCallback !== null;
 }
 
 /**
@@ -60,7 +61,7 @@ export async function requestBrowserCommand(
   afterAcknowledged?: BrowserCommandFinalizer,
   prepareCommand?: BrowserCommandFactory,
 ): Promise<BrowserCommandResult | null> {
-  if (!browserCommandCallback) return null;
+  if (isLocalProjectContext() || !browserCommandCallback) return null;
   const result = await browserCommandCallback(
     command,
     timeoutMs,
@@ -76,6 +77,8 @@ export async function requestBrowserCommand(
 /** Cell edits target the active layer; generator layers have no editable cells */
 export function assertActiveLayerAcceptsCells(projectManager: ProjectStateManager = getProjectManager()): void {
   const layer = projectManager.isLayerMode() ? projectManager.getActiveLayer() : null;
+  if (projectManager.isLayerMode() && !layer) throw new Error('No active layer selected');
+  if (layer?.locked) throw new Error(`Layer "${layer.name}" is locked`);
   if (layer && isGeneratorLayer(layer)) {
     throw new Error(
       `Active layer "${layer.name}" is a procedural generator layer and has no editable cells. ` +
@@ -86,7 +89,7 @@ export function assertActiveLayerAcceptsCells(projectManager: ProjectStateManage
 }
 
 export async function requireFreshBrowserState(): Promise<boolean> {
-  if (!browserCommandCallback) return false;
+  if (isLocalProjectContext() || !browserCommandCallback) return false;
   const refreshed = await ensureFreshBrowserState();
   if (!refreshed) {
     throw new Error('No browser connected or state refresh timed out');
@@ -130,7 +133,7 @@ export async function applyExactCellChanges({
   let localCount = 0;
   let reconciled = false;
 
-  if (!browserCommandCallback) {
+  if (isLocalProjectContext() || !browserCommandCallback) {
     localCount = frameIndex === undefined
       ? projectManager.setCellsAtTimelineFrame(resolvedFrameIndex, resolveCells())
       : projectManager.setCellsOnFrame(frameIndex, resolveCells());

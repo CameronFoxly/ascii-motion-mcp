@@ -108,16 +108,16 @@ export const ToolStateSchema = z.object({
   selectedCharacter: z.string().length(1).default('@'),
   paintBucketContiguous: z.boolean().default(true),
   rectangleFilled: z.boolean().default(false),
-});
+}).passthrough();
 
 export type ToolState = z.infer<typeof ToolStateSchema>;
 
 export const TypographySettingsSchema = z.object({
-  fontSize: z.number().min(8).max(32).default(16),
-  characterSpacing: z.number().min(0).max(10).default(0),
-  lineSpacing: z.number().min(0).max(10).default(0),
+  fontSize: z.number().finite().positive().default(16),
+  characterSpacing: z.number().finite().default(0),
+  lineSpacing: z.number().finite().default(0),
   selectedFontId: z.string().default('jetbrains-mono'),
-});
+}).passthrough();
 
 export type TypographySettings = z.infer<typeof TypographySettingsSchema>;
 
@@ -126,9 +126,9 @@ export const UIStateSchema = z.object({
   panOffset: z.object({
     x: z.number().default(0),
     y: z.number().default(0),
-  }).default({ x: 0, y: 0 }),
+  }).passthrough().default({ x: 0, y: 0 }),
   theme: z.enum(['light', 'dark']).default('dark'),
-});
+}).passthrough();
 
 export type UIState = z.infer<typeof UIStateSchema>;
 
@@ -190,7 +190,7 @@ export const EasingCurveSchema = z.object({
   y1: z.number().optional(),
   x2: z.number().optional(),
   y2: z.number().optional(),
-});
+}).passthrough();
 export type EasingCurve = z.infer<typeof EasingCurveSchema>;
 
 /**
@@ -215,7 +215,7 @@ export const KeyframeSchema = z.object({
   frame: z.number().int().min(0).describe('Frame number'),
   value: z.union([z.number(), z.boolean(), z.string()]).describe('Keyframe value'),
   easing: EasingCurveSchema.describe('Easing curve for interpolation to next keyframe'),
-});
+}).passthrough();
 export type MCPKeyframe = z.infer<typeof KeyframeSchema>;
 
 /**
@@ -226,7 +226,7 @@ export const PropertyTrackSchema = z.object({
   propertyPath: PropertyPathSchema.describe('Property being keyframed'),
   keyframes: z.array(KeyframeSchema).describe('Keyframes on this track'),
   loopKeyframes: z.boolean().default(false).describe('Loop keyframe pattern'),
-});
+}).passthrough();
 export type MCPPropertyTrack = z.infer<typeof PropertyTrackSchema>;
 
 /**
@@ -239,6 +239,7 @@ export const ContentFrameSchema = z.object({
   durationFrames: z.number().int().min(1).describe('Duration in frames'),
   data: CanvasDataSchema.describe('Cell data for this content frame'),
   hidden: z.boolean().optional().describe('Whether frame is hidden from playback'),
+  labelColor: z.string().nullable().optional(),
 });
 export type MCPContentFrame = z.infer<typeof ContentFrameSchema>;
 
@@ -250,7 +251,7 @@ export const EffectKeyframeSchema = z.object({
   frame: z.number().int().min(0).describe('Frame number'),
   value: z.union([z.number(), z.boolean(), z.string(), z.record(z.string(), z.string())]).describe('Keyframe value'),
   easing: EasingCurveSchema.describe('Easing curve'),
-});
+}).passthrough();
 export type MCPEffectKeyframe = z.infer<typeof EffectKeyframeSchema>;
 
 /**
@@ -261,7 +262,7 @@ export const EffectPropertyTrackSchema = z.object({
   propertyPath: z.string().describe('Property path within effect settings'),
   keyframes: z.array(EffectKeyframeSchema).describe('Keyframes on this property'),
   loopKeyframes: z.boolean().optional().describe('Whether keyframes loop'),
-});
+}).passthrough();
 export type MCPEffectPropertyTrack = z.infer<typeof EffectPropertyTrackSchema>;
 
 /**
@@ -275,7 +276,7 @@ export const EffectBlockSchema = z.object({
   enabled: z.boolean().default(true).describe('Whether effect is active'),
   settings: z.record(z.string(), z.unknown()).describe('Effect-specific settings'),
   propertyTracks: z.array(EffectPropertyTrackSchema).describe('Keyframed effect properties'),
-});
+}).passthrough();
 export type MCPEffectBlock = z.infer<typeof EffectBlockSchema>;
 
 /**
@@ -286,7 +287,7 @@ export const EffectTrackSchema = z.object({
   ownerId: z.string().nullable().describe('Owner layer/group ID, null for global'),
   effectBlock: EffectBlockSchema.describe('The effect block'),
   collapsed: z.boolean().optional().describe('Whether track is collapsed in UI'),
-});
+}).passthrough();
 export type MCPEffectTrack = z.infer<typeof EffectTrackSchema>;
 
 /**
@@ -302,7 +303,7 @@ export const GeneratorSourceSchema = z.object({
   enabled: z.boolean().default(true).describe('Whether the generator renders'),
   settings: z.record(z.string(), z.unknown()).describe('Static settings keyed by property path'),
   propertyTracks: z.array(EffectPropertyTrackSchema).describe('Keyframed generator properties'),
-});
+}).passthrough();
 export type MCPGeneratorSource = z.infer<typeof GeneratorSourceSchema>;
 
 export const LayerKindSchema = z.enum(['content', 'generator']);
@@ -343,7 +344,7 @@ export const LayerGroupSchema = z.object({
   propertyTracks: z.array(PropertyTrackSchema).optional().describe('Group-level keyframeable tracks'),
   effectTracks: z.array(EffectTrackSchema).optional().describe('Procedural effect tracks on this group'),
   staticProperties: z.record(z.string(), z.number()).optional(),
-});
+}).passthrough();
 export type MCPLayerGroup = z.infer<typeof LayerGroupSchema>;
 
 /**
@@ -358,7 +359,47 @@ export type TimelineConfig = z.infer<typeof TimelineConfigSchema>;
 /**
  * v2.0.0 Session data format with layer support.
  */
-export const SessionDataV2Schema = z.object({
+export interface SessionDataV2 {
+  [key: string]: unknown;
+  version: '2.0.0' | '2.1.0' | '2.2.0';
+  name?: string;
+  description?: string;
+  metadata?: { [key: string]: unknown; exportedAt?: string; exportVersion?: string; userAgent?: string };
+  canvas: {
+    [key: string]: unknown;
+    width: number; height: number; canvasBackgroundColor: string; showGrid: boolean;
+  };
+  timeline: {
+    [key: string]: unknown;
+    frameRate: number; durationFrames: number; looping: boolean;
+  };
+  layers: Array<{
+    [key: string]: unknown;
+    id: string; name: string; visible: boolean; solo: boolean; locked: boolean; opacity: number;
+    parentGroupId?: string;
+    contentFrames: Array<{
+      [key: string]: unknown;
+      id: string; name: string; startFrame: number; durationFrames: number;
+      data?: CanvasData; hidden?: boolean; labelColor?: string | null;
+    }>;
+    propertyTracks: Array<{
+      [key: string]: unknown;
+      id: string; propertyPath: string; loopKeyframes: boolean; keyframes: MCPKeyframe[];
+    }>;
+    effectTracks?: MCPEffectTrack[];
+    staticProperties?: Record<string, number>;
+    syncKeyframesToFrames?: boolean;
+    kind?: LayerKind;
+    generator?: MCPGeneratorSource;
+  }>;
+  layerGroups?: MCPLayerGroup[];
+  globalEffects?: MCPEffectTrack[];
+  tools?: ToolState;
+  typography?: TypographySettings;
+  ui?: UIState;
+}
+
+export const SessionDataV2Schema: z.ZodType<SessionDataV2, z.ZodTypeDef, unknown> = z.object({
   version: z.enum(['2.0.0', '2.1.0', '2.2.0']),
   name: z.string().optional(),
   description: z.string().optional(),
@@ -366,20 +407,20 @@ export const SessionDataV2Schema = z.object({
     exportedAt: z.string().optional(),
     exportVersion: z.string().optional(),
     userAgent: z.string().optional(),
-  }).optional(),
+  }).passthrough().optional(),
 
   canvas: z.object({
     width: z.number().int().min(4).max(200),
     height: z.number().int().min(4).max(100),
     canvasBackgroundColor: z.string(),
     showGrid: z.boolean().default(true),
-  }),
+  }).passthrough(),
 
   timeline: z.object({
     frameRate: z.number().min(1).max(120).default(12),
     durationFrames: z.number().int().min(1).default(12),
     looping: z.boolean().default(true),
-  }),
+  }).passthrough(),
 
   layers: z.array(z.object({
     id: z.string(),
@@ -394,9 +435,12 @@ export const SessionDataV2Schema = z.object({
       name: z.string(),
       startFrame: z.number().int().min(0),
       durationFrames: z.number().int().min(1),
-      data: z.record(z.string(), CellSchema).optional(),
+      data: z.record(z.string(), z.object({
+        char: z.string(), color: z.string(), bgColor: z.string(),
+      }).passthrough()).optional(),
       hidden: z.boolean().optional(),
-    })),
+      labelColor: z.string().nullable().optional(),
+    }).passthrough()),
     propertyTracks: z.array(z.object({
       id: z.string(),
       propertyPath: z.string(),
@@ -406,23 +450,21 @@ export const SessionDataV2Schema = z.object({
         frame: z.number().int().min(0),
         value: z.union([z.number(), z.boolean(), z.string()]),
         easing: EasingCurveSchema,
-      })),
-    })),
+      }).passthrough()),
+    }).passthrough()),
     effectTracks: z.array(EffectTrackSchema).optional(),
     staticProperties: z.record(z.string(), z.number()).optional(),
     syncKeyframesToFrames: z.boolean().optional(),
     kind: LayerKindSchema.optional(),
     generator: GeneratorSourceSchema.optional(),
-  })),
+  }).passthrough()),
 
   layerGroups: z.array(LayerGroupSchema).optional(),
   globalEffects: z.array(EffectTrackSchema).optional(),
   tools: ToolStateSchema.optional(),
   typography: TypographySettingsSchema.optional(),
   ui: UIStateSchema.optional(),
-});
-
-export type SessionDataV2 = z.infer<typeof SessionDataV2Schema>;
+}).passthrough();
 
 /**
  * Detect session format version from raw data.
@@ -433,7 +475,8 @@ export function detectSessionVersion(data: unknown): '1.0.0' | '2.0.0' | 'unknow
   if (session.version === '2.0.0' && 'layers' in session) return '2.0.0';
   if (session.version === '2.1.0' && 'layers' in session) return '2.0.0';
   if (session.version === '2.2.0' && 'layers' in session) return '2.0.0';
-  if ('animation' in session) return '1.0.0';
+  if ((session.version === undefined || session.version === '1.0.0')
+    && 'animation' in session && !('layers' in session)) return '1.0.0';
   return 'unknown';
 }
 

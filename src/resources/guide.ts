@@ -5,7 +5,7 @@
  * LLMs can read these resources before starting complex animation tasks.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 
 const LLM_BEST_PRACTICES_GUIDE = `# ASCII Motion MCP - LLM Best Practices
 
@@ -27,21 +27,21 @@ Animated elements like data flow particles must be placed EXACTLY on these coord
 3. Find cells with connection characters
 4. Use those exact x,y values for animation elements
 
-## Frame Insertion Order (CRITICAL)
+## Time, Targets and Batches
 
-copy_frame_and_modify inserts at index 1, so frames end up in REVERSE order!
+Use get_capabilities and get_document_summary before editing a connected app.
+Canonical operations use stable IDs and absolute zero-based timeline frames.
+Content-frame ordinals are not timeline positions: a held content frame may
+cover many timeline frames, and a generator layer may have no content frames.
 
-If you create frames for steps 1 through 5:
-- Index 0: Base
-- Index 1: Step 5 (last created)
-- Index 2: Step 4
-- Index 3: Step 3
-- Index 4: Step 2
-- Index 5: Step 1 (first created)
+copy_frame_and_modify supports insertAtIndex; choose insertion positions
+explicitly instead of relying on repeated insertion to reverse the sequence.
+Prefer native content-frame operations and apply_operations for new workflows.
+An atomic batch produces one undo entry and rolls back every step on failure.
 
-Solutions:
-- Create frames in reverse order (step 5 first, step 1 last)
-- Or accept reverse order - animation loops anyway
+Keep read scopes small. Follow artifact page cursors for large results rather
+than requesting full documents repeatedly. Do not automatically retry a timed-out
+mutation: reconnect and inspect the actual document first.
 
 ## Braille Spinner Sequence
 
@@ -62,7 +62,7 @@ Use consistent colors to convey meaning:
 
 1. Guessing coordinates - ALWAYS inspect with get_canvas_preview first
 2. Elements off connection lines - They look disconnected and wrong
-3. Forgetting frame order reversal - Animation plays backwards
+3. Confusing content-frame ordinals with absolute timeline frames
 4. Wrong braille sequence - Spinner looks jerky
 5. Placing indicators in empty space - Put inside/adjacent to boxes
 6. Not checking cell contents - May overwrite important characters
@@ -75,11 +75,18 @@ Use consistent colors to convey meaning:
 4. get_canvas_render(maxWidth=80) - review terminal colors and composition
 5. get_canvas_preview(region) - get exact coordinates
 6. set_cell() for base indicators using EXACT coords
-7. copy_frame_and_modify() for each animation step (reverse order!)
+7. copy_frame_and_modify(insertAtIndex=...) or native content-frame operations
 8. describe_animation() to verify
 `;
 
-const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.3.0)
+const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories
+
+Use tools/list for exact current schemas and get_capabilities for the connected
+app. Canonical operations that collide with compatibility names use app_ prefixes.
+Use get_catalog for dynamic drawing, fonts, generators, effects, shaders, palettes
+and export options. Full native operations include drawing/gradients/FIGlet,
+content-frame timing, group transforms, effect/shader keys, media, palettes and
+authenticated cloud projects. Headless mode does not recreate app rendering.
 
 ## Canvas Editing
 - set_cell - Set character and colors at position
@@ -116,7 +123,7 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.3.0)
 - ungroup_layers - Dissolve a group
 
 ## Timeline (v2)
-- set_frame_rate - Set animation FPS (1-120)
+- set_frame_rate - Set animation FPS within the connected app's supported range
 - set_timeline_duration - Set total timeline length
 
 ## Animation and Frames (legacy)
@@ -145,7 +152,7 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.3.0)
 
 ## Procedural Effects (v2.1 — non-destructive, keyframeable)
 - get_effect_blocks - List all procedural effect blocks across layers/groups/global
-- add_effect_block - Add a non-destructive effect (levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle)
+- add_effect_block - Add a non-destructive effect (levels, hue-saturation, remap-colors, remap-characters, scatter, wave-warp, wiggle, motion-trails)
 - update_effect_block - Update effect settings, timing, or enabled state
 - remove_effect_block - Remove a procedural effect
 - add_effect_keyframe - Keyframe an effect property for animation

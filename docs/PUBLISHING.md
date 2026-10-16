@@ -1,125 +1,60 @@
-# Publishing Updates to npm
+# Publishing a compatible release
 
-This guide covers how to publish updates to the `ascii-motion-mcp` npm package.
+Publishing requires explicit maintainer authorization. Do not combine a version
+bump, push and publish into an unchecked one-liner.
 
-## Prerequisites
+## Verify the pair
 
-- npm account with publish access to `ascii-motion-mcp`
-- Logged in via `npm login`
+1. Land the matching app implementation and generated bridge contract.
+2. Run the **App contract parity** workflow against its immutable commit.
+3. Confirm contract/catalog hashes and real stdio-to-mounted-editor behavior.
+   Exercise every registered compatibility adapter and each new capability
+   family. Success-shaped responses alone are not a passing test.
+4. Verify native save/load round trips, composited previews, one-step undo/redo,
+   rollback, invalid input, stale revisions, reconnect and multiple clients.
+5. Exercise exports without browser downloads. Record browser codec limits and
+   authenticated/entitlement checks using a disposable account/project.
 
-## Publishing Workflow
+Do not claim untested authenticated cloud operations or MP4 support. Document
+remaining blockers explicitly.
 
-### 1. Make Your Changes
+## Validate this package
 
-Edit the source code, then build and test:
-
-```bash
+```sh
+npm ci
+npm run check:bridge-contract
 npm run build
-npm run test  # if tests exist
+npm run lint
+npm run test:protocol:types
+npm run test:run
+npm pack --dry-run
 ```
 
-### 2. Commit Your Changes
+CI runs Node 22 and 24. Protocol tests cover legacy initialization, modern
+discovery, actual stdio calls, cancellation, resource/prompt access, EOF and
+installed-package startup. Check the packed files include the bundled contract.
 
-```bash
-git add -A
-git commit -m "Description of changes"
-```
+Measure serialized discovery and representative dense result sizes. Default
+results must remain within 16 KiB; explicit pages must remain within 64 KiB.
+Check continuation counts/cursors and artifact bytes, not merely a character
+preview or reported file size.
 
-### 3. Bump the Version
+## Version, publish and document
 
-Use semantic versioning to bump the version:
+Choose a semver version appropriate to the compatibility change. Requiring
+Node 22 and a v3 app bridge is a breaking deployment requirement; do not call it
+an invisible patch to existing live clients.
 
-```bash
-# Bug fixes (0.1.0 → 0.1.1)
-npm version patch
+After versioning, rerun package smoke checks and verify `--version` matches the
+manifest. Publish to an appropriate prerelease tag first when validation is
+still in progress. Publish to `latest` only after release approval and acceptance.
 
-# New features, backwards compatible (0.1.0 → 0.2.0)
-npm version minor
+Update host installation commands to the actual tested release. Test a fresh
+GitHub Copilot app/CLI installation against the same process's browser token.
+Do not advertise an unreleased npm version as installable.
 
-# Breaking changes (0.1.0 → 1.0.0)
-npm version major
-```
-
-This command:
-- Updates `package.json` version
-- Creates a git commit
-- Creates a git tag (e.g., `v0.1.1`)
-
-### 4. Publish to npm
-
-```bash
-npm publish
-```
-
-This runs the `prepublishOnly` script (builds the project) and uploads to npm.
-
-### 5. Push to GitHub
-
-```bash
-git push && git push --tags
-```
-
-## One-Liner for Quick Releases
-
-For a patch release:
-```bash
-git add -A && git commit -m "Fix: description" && npm version patch && npm publish && git push && git push --tags
-```
-
-## Version History
-
-Check the current published version:
-```bash
-npm view ascii-motion-mcp version
-```
-
-See all published versions:
-```bash
-npm view ascii-motion-mcp versions
-```
-
-## Prerelease Versions
-
-For alpha/beta releases:
-
-```bash
-# Create prerelease version
-npm version prerelease --preid=alpha  # 0.1.1 → 0.1.2-alpha.0
-
-# Publish with tag (won't be installed by default)
-npm publish --tag alpha
-```
-
-Users install prereleases with:
-```bash
-npm install -g ascii-motion-mcp@alpha
-```
-
-## Deprecating Versions
-
-If a version has a critical bug:
-
-```bash
-npm deprecate ascii-motion-mcp@0.1.1 "Critical bug, please upgrade to 0.1.2"
-```
-
-## Unpublishing (Use with Caution)
-
-You can only unpublish within 72 hours of publishing:
-
-```bash
-npm unpublish ascii-motion-mcp@0.1.1
-```
-
-## Troubleshooting
-
-### "You must be logged in to publish"
-```bash
-npm login
-```
-
-### "Cannot publish over existing version"
-You must bump the version before publishing. Use `npm version patch/minor/major`.
-
-### "Git working directory not clean"
-Commit all changes before running `npm version`.
+The published docs live in `CameronFoxly/Ascii-Motion-Web`, under `docs-site/`.
+Regenerate their tool reference from the final discovery/connected-status
+manifest and run their docs checks, lint and build. Publish that web commit
+before updating the app's `packages/web` gitlink. Keep app, MCP and docs release
+references linked so a future contributor can reproduce the compatibility pair.

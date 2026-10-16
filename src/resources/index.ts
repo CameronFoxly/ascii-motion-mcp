@@ -1,321 +1,138 @@
-/**
- * MCP Resources
- * 
- * Exposes project state as MCP resources for subscription-based access.
- * Resources allow clients to read project data without tool calls.
- */
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
+import { executeBridgeOperation, isBrowserBridgeConfigured } from '../bridge.js';
+import { DEFAULT_RESPONSE_BYTES, storeArtifact } from '../artifacts.js';
 import { registerGuideResources } from './guide.js';
 
 export function registerResources(server: McpServer): void {
-  // ==========================================================================
-  // project://state - Full project state snapshot
-  // ==========================================================================
-  server.resource(
-    'project-state',
-    'project://state',
-    {
-      description: 'Current project state including canvas, frames, and settings. Returns a complete snapshot.',
-      mimeType: 'application/json',
-    },
-    async () => {
+  function register(
+    name: string, uri: string, description: string,
+    local: () => unknown, live: () => Promise<unknown>, mimeType = 'application/json',
+  ) {
+    server.resource(name, uri, { description, mimeType }, async () => {
+      const data = await (isBrowserBridgeConfigured() ? live() : local());
+      const text = typeof data === 'string' ? data : JSON.stringify(data);
+      const response = { contents: [{ uri, mimeType, text }] };
+      if (Buffer.byteLength(JSON.stringify(response)) <= DEFAULT_RESPONSE_BYTES) return response;
+      const artifact = await storeArtifact(text, `${name}.${mimeType === 'text/plain' ? 'txt' : 'json'}`, mimeType);
+      return { contents: [{
+        uri, mimeType: 'application/json',
+        text: JSON.stringify({
+          inline: false, artifact,
+          read: { tool: 'read_artifact', artifactId: artifact.id, offset: 0, length: 4096 },
+        }),
+      }] };
+    });
+  }
+
+  register('project-state', 'project://state',
+    'Compact authoritative document summary. Use get_document for the complete native session.',
+    () => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
       return {
-        contents: [{
-          uri: 'project://state',
-          mimeType: 'application/json',
-          text: JSON.stringify({
-            name: state.name,
-            description: state.description,
-            width: state.width,
-            height: state.height,
-            backgroundColor: state.backgroundColor,
-            isLayerMode: pm.isLayerMode(),
-            frameCount: state.frames.length,
-            currentFrameIndex: state.currentFrameIndex,
-            isDirty: state.isDirty,
-            toolState: state.toolState,
-            hasSelection: state.selection !== null,
-            // v2 layer info
-            layerCount: state.layers.length,
-            activeLayerId: state.activeLayerId,
-            timeline: pm.isLayerMode() ? state.timelineConfig : undefined,
-            groupCount: state.layerGroups.length,
-          }, null, 2),
-        }],
+        name: state.name, description: state.description,
+        width: state.width, height: state.height, backgroundColor: state.backgroundColor,
+        isLayerMode: pm.isLayerMode(), frameCount: state.frames.length,
+        currentFrameIndex: state.currentFrameIndex, isDirty: state.isDirty,
+        toolState: state.toolState, hasSelection: state.selection !== null,
+        layerCount: state.layers.length, activeLayerId: state.activeLayerId,
+        timeline: state.timelineConfig, groupCount: state.layerGroups.length,
       };
-    }
-  );
-
-  // ==========================================================================
-  // project://canvas - Current frame canvas data
-  // ==========================================================================
-  server.resource(
-    'project-canvas',
-    'project://canvas',
-    {
-      description: 'Current frame canvas data as a sparse map of cell positions to cell data.',
-      mimeType: 'application/json',
     },
-    async () => {
+    () => executeBridgeOperation('get_document_summary', {}));
+
+  register('project-canvas', 'project://canvas',
+    'Current timeline-frame cells; live reads use the compositor. Large results become paged artifacts.',
+    () => {
       const pm = getProjectManager();
       const state = pm.getState();
-      const frame = state.frames[state.currentFrameIndex];
-      
+      const frame = pm.getFrameAtTime(state.currentFrameIndex);
       return {
-        contents: [{
-          uri: 'project://canvas',
-          mimeType: 'application/json',
-          text: JSON.stringify({
-            frameIndex: state.currentFrameIndex,
-            frameName: frame?.name ?? 'Frame 1',
-            width: state.width,
-            height: state.height,
-            cellCount: frame ? Object.keys(frame.data).length : 0,
-            data: frame?.data ?? {},
-          }, null, 2),
-        }],
+        frameIndex: state.currentFrameIndex, frameName: frame?.name,
+        width: state.width, height: state.height,
+        cellCount: Object.keys(frame?.data ?? {}).length, data: frame?.data ?? {},
       };
-    }
-  );
+    },
+    () => executeBridgeOperation('read_cells', { scope: 'composite', format: 'cells' }));
 
-  // ==========================================================================
-  // project://frames - List of all frames with metadata
-  // ==========================================================================
-  server.resource(
-    'project-frames',
-    'project://frames',
-    {
-      description: 'List of all animation frames with their metadata (id, name, duration, cell count).',
-      mimeType: 'application/json',
+  register('project-frames', 'project://frames',
+    'Content-frame metadata. Content-frame ordinals are not timeline positions.',
+    () => {
+      const state = getProjectManager().getState();
+      return {
+        frameCount: state.frames.length, currentFrameIndex: state.currentFrameIndex,
+        totalDuration: state.frames.reduce((sum, frame) => sum + frame.duration, 0),
+        frames: state.frames.map((frame, index) => ({
+          index, id: frame.id, name: frame.name, duration: frame.duration,
+          cellCount: Object.keys(frame.data).length,
+        })),
+      };
     },
     async () => {
+      const summary = await executeBridgeOperation('get_document_summary', {});
+      const layers = z.array(z.object({ id: z.string(), contentFrames: z.array(z.unknown()) })).parse(summary.layers);
+      return { timeline: summary.timeline, activeLayerId: summary.activeLayerId, layers };
+    });
+
+  register('project-selection', 'project://selection',
+    'Current authoritative selection and clipboard summary.',
+    () => {
+      const selection = getProjectManager().getState().selection;
+      return { hasSelection: selection !== null, selection };
+    },
+    () => executeBridgeOperation('get_selection', {}));
+
+  register('project-history', 'project://history',
+    'Actual undo/redo history status.',
+    () => getProjectManager().getHistoryInfo(),
+    () => executeBridgeOperation('get_history', {}));
+
+  register('project-ascii', 'project://ascii',
+    'Plain text at the current timeline frame; composited in live mode.',
+    () => {
       const pm = getProjectManager();
       const state = pm.getState();
-      
-      return {
-        contents: [{
-          uri: 'project://frames',
-          mimeType: 'application/json',
-          text: JSON.stringify({
-            frameCount: state.frames.length,
-            currentFrameIndex: state.currentFrameIndex,
-            totalDuration: state.frames.reduce((sum, f) => sum + f.duration, 0),
-            frames: state.frames.map((f, i) => ({
-              index: i,
-              id: f.id,
-              name: f.name,
-              duration: f.duration,
-              cellCount: Object.keys(f.data).length,
-              isCurrent: i === state.currentFrameIndex,
-            })),
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  // ==========================================================================
-  // project://selection - Current selection state
-  // ==========================================================================
-  server.resource(
-    'project-selection',
-    'project://selection',
-    {
-      description: 'Current selection state including type and selected cells.',
-      mimeType: 'application/json',
+      const frame = pm.getFrameAtTime(state.currentFrameIndex);
+      const lines = Array.from({ length: state.height }, (_, y) =>
+        Array.from({ length: state.width }, (_, x) => frame?.data[`${x},${y}`]?.char ?? ' ').join('').trimEnd());
+      while (lines.length && !lines.at(-1)) lines.pop();
+      return lines.join('\n') || '(empty canvas)';
     },
     async () => {
-      const pm = getProjectManager();
-      const state = pm.getState();
-      
-      let selectionData: Record<string, unknown> = {
-        hasSelection: false,
-      };
-      
-      if (state.selection) {
-        if (state.selection.type === 'rectangle') {
-          selectionData = {
-            hasSelection: true,
-            type: 'rectangle',
-            start: state.selection.start,
-            end: state.selection.end,
-            width: Math.abs(state.selection.end.x - state.selection.start.x) + 1,
-            height: Math.abs(state.selection.end.y - state.selection.start.y) + 1,
-          };
-        } else if (state.selection.type === 'cells') {
-          selectionData = {
-            hasSelection: true,
-            type: 'cells',
-            cellCount: state.selection.cells.length,
-            cells: Array.from(state.selection.cells),
-          };
-        }
-      }
-      
-      return {
-        contents: [{
-          uri: 'project://selection',
-          mimeType: 'application/json',
-          text: JSON.stringify(selectionData, null, 2),
-        }],
-      };
-    }
-  );
+      const result = await executeBridgeOperation('read_cells', { scope: 'composite', format: 'text' });
+      return z.array(z.string()).parse(result.text).join('\n');
+    }, 'text/plain');
 
-  // ==========================================================================
-  // project://history - Undo/redo history status
-  // ==========================================================================
-  server.resource(
-    'project-history',
-    'project://history',
-    {
-      description: 'Undo/redo history status including available actions.',
-      mimeType: 'application/json',
+  register('project-layers', 'project://layers',
+    'Layer, group, timeline and procedural-block structure.',
+    () => {
+      const state = getProjectManager().getState();
+      return {
+        activeLayerId: state.activeLayerId, currentFrame: state.currentFrameIndex,
+        timeline: state.timelineConfig,
+        layers: state.layers.map(layer => ({
+          id: layer.id, name: layer.name, visible: layer.visible, solo: layer.solo,
+          locked: layer.locked, opacity: layer.opacity, parentGroupId: layer.parentGroupId,
+          contentFrames: layer.contentFrames.map(({ data, ...frame }) => ({
+            ...frame, cellCount: Object.keys(data).length,
+          })),
+          propertyTracks: layer.propertyTracks.map(({ keyframes, ...track }) => ({
+            ...track, keyframeCount: keyframes.length,
+          })),
+          effectTracks: layer.effectTracks, generator: layer.generator,
+        })),
+        groups: state.layerGroups,
+      };
     },
     async () => {
-      const pm = getProjectManager();
-      const historyStatus = pm.getHistoryInfo();
-      
+      const summary = await executeBridgeOperation('get_document_summary', {});
       return {
-        contents: [{
-          uri: 'project://history',
-          mimeType: 'application/json',
-          text: JSON.stringify(historyStatus, null, 2),
-        }],
+        activeLayerId: summary.activeLayerId, timeline: summary.timeline,
+        layers: summary.layers, groups: summary.groups, effects: summary.effects, shaders: summary.shaders,
       };
-    }
-  );
+    });
 
-  // ==========================================================================
-  // project://ascii - ASCII art preview of current frame
-  // ==========================================================================
-  server.resource(
-    'project-ascii',
-    'project://ascii',
-    {
-      description: 'Plain text ASCII art preview of the current frame.',
-      mimeType: 'text/plain',
-    },
-    async () => {
-      const pm = getProjectManager();
-      const state = pm.getState();
-      const frame = state.frames[state.currentFrameIndex];
-      
-      if (!frame) {
-        return {
-          contents: [{
-            uri: 'project://ascii',
-            mimeType: 'text/plain',
-            text: '(empty canvas)',
-          }],
-        };
-      }
-      
-      // Build ASCII preview
-      const lines: string[] = [];
-      for (let y = 0; y < state.height; y++) {
-        let line = '';
-        for (let x = 0; x < state.width; x++) {
-          const cell = frame.data[`${x},${y}`];
-          line += cell?.char ?? ' ';
-        }
-        lines.push(line.trimEnd());
-      }
-      
-      // Trim empty lines from end
-      while (lines.length > 0 && lines[lines.length - 1] === '') {
-        lines.pop();
-      }
-      
-      return {
-        contents: [{
-          uri: 'project://ascii',
-          mimeType: 'text/plain',
-          text: lines.join('\n') || '(empty canvas)',
-        }],
-      };
-    }
-  );
-
-  // ==========================================================================
-  // project://layers - Layer structure and metadata (v2)
-  // ==========================================================================
-  server.resource(
-    'project-layers',
-    'project://layers',
-    {
-      description: 'Layer structure with content frames, property tracks, and groups. Only available in layer mode (v2).',
-      mimeType: 'application/json',
-    },
-    async () => {
-      const pm = getProjectManager();
-      const state = pm.getState();
-
-      if (!pm.isLayerMode()) {
-        return {
-          contents: [{
-            uri: 'project://layers',
-            mimeType: 'application/json',
-            text: JSON.stringify({
-              isLayerMode: false,
-              message: 'Project is in legacy frame mode. Use add_layer to switch to layer mode.',
-            }, null, 2),
-          }],
-        };
-      }
-
-      return {
-        contents: [{
-          uri: 'project://layers',
-          mimeType: 'application/json',
-          text: JSON.stringify({
-            isLayerMode: true,
-            activeLayerId: state.activeLayerId,
-            currentFrame: state.currentFrameIndex,
-            timeline: state.timelineConfig,
-            layers: state.layers.map(l => ({
-              id: l.id,
-              name: l.name,
-              visible: l.visible,
-              solo: l.solo,
-              locked: l.locked,
-              opacity: l.opacity,
-              isActive: l.id === state.activeLayerId,
-              parentGroupId: l.parentGroupId,
-              contentFrames: l.contentFrames.map(cf => ({
-                id: cf.id,
-                name: cf.name,
-                startFrame: cf.startFrame,
-                durationFrames: cf.durationFrames,
-                cellCount: Object.keys(cf.data).length,
-                hidden: cf.hidden,
-              })),
-              propertyTracks: l.propertyTracks.map(pt => ({
-                id: pt.id,
-                propertyPath: pt.propertyPath,
-                keyframeCount: pt.keyframes.length,
-                loopKeyframes: pt.loopKeyframes,
-              })),
-            })),
-            groups: state.layerGroups.map(g => ({
-              id: g.id,
-              name: g.name,
-              childLayerIds: g.childLayerIds,
-              visible: g.visible,
-              collapsed: g.collapsed,
-            })),
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-
-  // Register LLM guide resources
   registerGuideResources(server);
 }

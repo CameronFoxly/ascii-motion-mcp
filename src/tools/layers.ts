@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange, ensureFreshBrowserState } from '../state.js';
 import { requestBrowserCommand } from '../live-sync.js';
 import {
@@ -544,7 +544,7 @@ export function registerLayerTools(server: McpServer): void {
     'set_frame_rate',
     'Set the timeline frame rate (FPS). Preserves frame count — only changes playback speed.',
     {
-      fps: z.number().min(1).max(120).describe('Frames per second'),
+      fps: z.number().int().min(1).max(60).describe('Frames per second'),
     },
     async ({ fps }) => {
       const pm = getProjectManager();
