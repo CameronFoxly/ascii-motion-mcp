@@ -41,6 +41,13 @@ In the same Copilot conversation, call `get_auth_token` and
 `get_connection_status`. Open the app's **MCP Connection** dialog, enter that
 instance's token and port, and connect. Treat the token as a secret.
 
+The Copilot app starts a separate server for every conversation that has the
+MCP enabled. A server binds its live port only when a tool is first used, so
+idle conversations do not hold it. If another conversation already owns the
+port, live tools return `PORT_IN_USE` instead of crashing; close that
+conversation (or stop its server) and retry, and the server binds on the next
+tool call.
+
 ### GitHub Copilot CLI
 
 Use the standalone `copilot` CLI, not the retired `gh copilot` extension:
