@@ -32,15 +32,17 @@ npm install -g ascii-motion-mcp@latest
 
 ### Option 3: Install Specific Version
 
-For example, to pin the published legacy release:
+Bridge v3 (current app, 2.2.6 or later):
+
+```bash
+npm install -g ascii-motion-mcp@3
+```
+
+The legacy release, only for older app builds without v3 negotiation:
 
 ```bash
 npm install -g ascii-motion-mcp@2.3.0
 ```
-
-For bridge v3, use the exact version from the compatible release notes once
-published, or run the matching local development build. Do not substitute
-`@latest` for an unreleased app/MCP pair.
 
 ## After Updating
 
@@ -50,11 +52,10 @@ published, or run the matching local development build. Do not substitute
 Use `get_auth_token` and `get_connection_status` from the instance started by
 your AI host. Do not start a second terminal process to get its token.
 
-Bridge v3 development builds require Node 22 or 24 and a matching app build.
-The published 2.3.0 package does not gain unreleased features simply by
-reconnecting. Check `get_capabilities` after connecting and update the app/MCP
-as a compatible pair. Legacy apps without v3 negotiation cannot safely use the
-new live operation path.
+Version 3 requires Node 22 or 24 and an app that speaks bridge v3. Check
+`get_capabilities` after connecting; a contract hash mismatch means the app and
+MCP must be updated as a compatible pair. Legacy apps without v3 negotiation
+cannot use the v3 live operation path.
 
 ## View Changelog
 

@@ -3,10 +3,10 @@
 Create, animate and export ASCII art from an MCP-compatible assistant, using
 [ASCII Motion](https://ascii-motion.app) as the authoritative editor.
 
-> **Development branch:** bridge v3 features require matching app and MCP builds.
-> The published `ascii-motion-mcp@2.3.0` package does not contain these repairs.
-> Use a local build when testing this branch; do not assume an npm installation
-> has unreleased capabilities.
+> **Version 3 requires bridge v3.** `ascii-motion-mcp@3` pairs with
+> [ascii-motion.app](https://ascii-motion.app) 2.2.6 or later (bridge contract
+> `e76f9c34204f`). Check `get_capabilities` after connecting. Use
+> `ascii-motion-mcp@2.3.0` only with older app builds that lack v3 negotiation.
 
 ## Install and connect
 
@@ -19,7 +19,7 @@ For a published release:
 npm install -g ascii-motion-mcp
 ```
 
-For this development branch:
+From a source checkout (for development):
 
 ```sh
 npm ci
@@ -29,7 +29,7 @@ node dist/index.js --help
 
 Configure the host with `command: "node"` and arguments
 `["/absolute/path/to/ascii-motion-mcp/dist/index.js", "--live", "--project-dir",
-"/absolute/path/to/projects"]`. Use a matching local app build for bridge v3.
+"/absolute/path/to/projects"]`. A source build must match the app's bridge contract.
 
 ### GitHub Copilot app
 
