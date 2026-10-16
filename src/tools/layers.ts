@@ -13,6 +13,7 @@ import {
   EasingCurveSchema,
   PropertyPathSchema,
   CanvasDataSchema,
+  isGeneratorLayer,
 } from '../types.js';
 
 export function registerLayerTools(server: McpServer): void {
@@ -52,6 +53,16 @@ export function registerLayerTools(server: McpServer): void {
         effectTrackCount: (l.effectTracks ?? []).length,
         parentGroupId: l.parentGroupId,
         totalCells: l.contentFrames.reduce((sum, cf) => sum + Object.keys(cf.data).length, 0),
+        kind: l.kind ?? 'content',
+        ...(l.generator ? {
+          generator: {
+            generatorType: l.generator.generatorType,
+            startFrame: l.generator.startFrame,
+            durationFrames: l.generator.durationFrames,
+            enabled: l.generator.enabled,
+            animatedPropertyCount: l.generator.propertyTracks.filter(t => t.keyframes.length > 0).length,
+          },
+        } : {}),
       }));
 
       return {
@@ -307,6 +318,14 @@ export function registerLayerTools(server: McpServer): void {
     },
     async ({ layerId, startFrame, durationFrames, data }) => {
       const pm = getProjectManager();
+      if (isGeneratorLayer(pm.getLayer(layerId))) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            error: 'Layer is a procedural generator layer; it cannot hold content frames. Use update_generator_layer to change its span, or bake_generator_layer to convert it to cells.',
+          }) }],
+          isError: true,
+        };
+      }
       const cf = pm.addContentFrame(layerId, startFrame, durationFrames, data);
 
       if (!cf) {
@@ -450,6 +469,8 @@ export function registerLayerTools(server: McpServer): void {
         content: [{ type: 'text' as const, text: JSON.stringify({
           layerId,
           layerName: layer?.name,
+          kind: layer?.kind ?? 'content',
+          ...(layer?.generator ? { generatorHint: 'Generator settings/keyframes: use get_generator_layers with this layerId.' } : {}),
           currentFrame: pm.getState().currentFrameIndex,
           properties,
           propertyTracks: layer?.propertyTracks.map(pt => ({

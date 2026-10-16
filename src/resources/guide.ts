@@ -151,6 +151,18 @@ const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.2.0)
 - add_effect_keyframe - Keyframe an effect property for animation
 - remove_effect_keyframe - Remove an effect keyframe
 
+## Procedural Generator Layers (v2.2 — live, keyframeable)
+- list_generator_types - Generator catalog; pass generatorType for every property path, range, options and when it applies
+- get_generator_layers - List generator layers, or inspect one (settings, keyframes, resolved values at a frame)
+- add_generator_layer - Add radio-waves, turbulent-noise, particle-physics, rain-drops, digital-rain or animated-text
+- add_animated_text - Add text with typewriter / blink / wave effects in one call
+- update_generator_layer - Static settings, span (startFrame/durationFrames), enabled, name
+- set_generator_property - Edit at the playhead (keys the value if the property is animated)
+- set_generator_keyframes / remove_generator_keyframes - Keyframe any generator property with easing and looping
+- reset_generator, randomize_generator_seed
+- render_generator_frames - See generator output as ASCII at chosen frames (live browser only)
+- bake_generator_layer - Convert to editable cells (live browser only)
+
 ## Selection Tools
 - select_rectangle - Select rectangular area
 - select_by_color - Magic wand selection
@@ -200,6 +212,27 @@ They are evaluated in real-time during playback and compositing.
 - Global effects (ownerId=null) apply after full compositing
 - wave-warp and wiggle are time-dependent — they animate automatically
 - Use get_effect_blocks to inspect current effects before modifying
+
+## Procedural Generator Workflow
+
+Generator layers are a special layer kind: a generator source (type, static settings,
+keyframed property tracks, visible span) renders every frame on demand. They have no
+content frames — cell-editing tools refuse them; layer transforms, opacity and effects still apply.
+
+1. list_generator_types → pick a type, then list_generator_types { generatorType } for property paths
+2. add_generator_layer (or add_animated_text) — canvas-aware defaults, span = whole timeline
+3. Animate with set_generator_keyframes (absolute frames, easing presets, loop)
+4. Check with get_generator_layers { layerId, frame } and, when live, render_generator_frames
+
+### Key Concepts
+- Settings are keyed by property path (e.g. "wave.amplitude", "mapping.characterPaletteId")
+- Properties marked "stepped" hold until the next keyframe; "smooth" ones interpolate
+- Rate properties (propagationSpeed, evolutionSpeed, wave.speed) integrate over time — keyframing them ramps speed
+- A static value is ignored once a property has keyframes; set_generator_property at a frame edits/keys it
+- Animated Text: typewriter.start/end are percent by default; switching typewriter.units converts values
+- Simulation generators (particles, rain, digital rain) are deterministic per seed
+- Headless mode edits and saves generators (session v2.2.0) but cannot render them; open in Ascii-Motion or use live mode
+- run_generator is the legacy tool that bakes static frames; prefer generator layers for editable results
 `;
 
 export function registerGuideResources(server: McpServer): void {

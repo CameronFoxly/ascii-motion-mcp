@@ -26,6 +26,7 @@ import {
   type EasingCurve,
   type MCPEffectTrack,
   type MCPEffectBlock,
+  type MCPGeneratorSource,
   EMPTY_CELL,
   createCellKey,
   parseCellKey,
@@ -39,11 +40,14 @@ import {
   generateEffectTrackId,
   generateEffectBlockId,
   generateEffectPropertyTrackId,
+  generateGeneratorSourceId,
+  isGeneratorLayer,
   detectSessionVersion,
   recordToMap,
   SessionDataSchema,
   SessionDataV2Schema,
 } from './types.js';
+import { normalizeGeneratorSource } from './generators/operations.js';
 
 // ============================================================================
 // History Entry Types
@@ -864,6 +868,17 @@ export class ProjectStateManager {
       id: generatePropertyTrackId(),
       keyframes: pt.keyframes.map((kf: MCPKeyframe) => ({ ...kf, id: generateKeyframeId() })),
     }));
+    if (newLayer.generator) {
+      newLayer.generator = {
+        ...newLayer.generator,
+        id: generateGeneratorSourceId(),
+        propertyTracks: newLayer.generator.propertyTracks.map(pt => ({
+          ...pt,
+          id: generateEffectPropertyTrackId(),
+          keyframes: pt.keyframes.map(kf => ({ ...kf, id: generateKeyframeId() })),
+        })),
+      };
+    }
     const sourceIndex = this.state.layers.findIndex(l => l.id === layerId);
     this.state.layers.splice(sourceIndex + 1, 0, newLayer);
     this.state.activeLayerId = newLayer.id;
@@ -940,7 +955,7 @@ export class ProjectStateManager {
 
   addContentFrame(layerId: string, startFrame: number, durationFrames: number, data?: CanvasData): MCPContentFrame | null {
     const layer = this.state.layers.find(l => l.id === layerId);
-    if (!layer) return null;
+    if (!layer || isGeneratorLayer(layer)) return null;
     const endFrame = startFrame + durationFrames;
     for (const cf of layer.contentFrames) {
       const cfEnd = cf.startFrame + cf.durationFrames;
@@ -1399,6 +1414,162 @@ export class ProjectStateManager {
   }
   
   // ==========================================================================
+  // Procedural Generator Layers
+  // ==========================================================================
+
+  getGeneratorLayers(): MCPLayer[] {
+    return this.state.layers.filter(l => isGeneratorLayer(l));
+  }
+
+  /** Return a generator layer or throw a descriptive error */
+  requireGeneratorLayer(layerId: string): MCPLayer & { generator: MCPGeneratorSource } {
+    const layer = this.state.layers.find(l => l.id === layerId);
+    if (!layer) throw new Error(`Layer not found: ${layerId}`);
+    if (!isGeneratorLayer(layer)) {
+      throw new Error(`Layer "${layer.name}" (${layerId}) is not a generator layer`);
+    }
+    return layer as MCPLayer & { generator: MCPGeneratorSource };
+  }
+
+  /** Grow the timeline so `frame` is inside it (app's ensureTimelineContains) */
+  ensureTimelineContains(frame: number): void {
+    if (frame + 1 > this.state.timelineConfig.durationFrames) {
+      this.state.timelineConfig.durationFrames = frame + 1;
+    }
+  }
+
+  /**
+   * Insert a generator layer (above the active layer, like the app) and
+   * record undo. Pass a fully-formed layer (e.g. from the browser) or let
+   * this build one from catalog defaults.
+   */
+  addGeneratorLayer(options: {
+    generatorType: string;
+    settings: Record<string, unknown>;
+    name: string;
+    startFrame: number;
+    durationFrames: number;
+    layer?: MCPLayer;
+  }): MCPLayer {
+    const layer: MCPLayer = options.layer
+      ? structuredClone(options.layer)
+      : {
+        id: generateLayerId(),
+        name: options.name,
+        visible: true,
+        solo: false,
+        locked: false,
+        opacity: 100,
+        kind: 'generator',
+        generator: {
+          id: generateGeneratorSourceId(),
+          generatorType: options.generatorType,
+          startFrame: options.startFrame,
+          durationFrames: options.durationFrames,
+          enabled: true,
+          settings: options.settings,
+          propertyTracks: [],
+        },
+        contentFrames: [],
+        propertyTracks: [],
+        effectTracks: [],
+        staticProperties: {
+          'transform.anchorPoint.x': Math.floor(this.state.width / 2),
+          'transform.anchorPoint.y': Math.floor(this.state.height / 2),
+        },
+      };
+    if (layer.generator) layer.generator = normalizeGeneratorSource(layer.generator);
+    layer.contentFrames = layer.contentFrames ?? [];
+    layer.propertyTracks = layer.propertyTracks ?? [];
+
+    const existingIndex = this.state.layers.findIndex(l => l.id === layer.id);
+    if (existingIndex !== -1) this.state.layers.splice(existingIndex, 1);
+    const activeIndex = this.state.activeLayerId
+      ? this.state.layers.findIndex(l => l.id === this.state.activeLayerId)
+      : -1;
+    const insertIndex = activeIndex !== -1 ? activeIndex + 1 : this.state.layers.length;
+    const previousActive = this.state.activeLayerId;
+    const previousDuration = this.state.timelineConfig.durationFrames;
+
+    const insert = () => {
+      this.state.layers.splice(insertIndex, 0, layer);
+      this.state.activeLayerId = layer.id;
+      if (layer.generator) {
+        this.ensureTimelineContains(layer.generator.startFrame + layer.generator.durationFrames - 1);
+      }
+    };
+    insert();
+    this.pushHistory({
+      type: 'layer_add',
+      description: `Add ${layer.name} generator`,
+      timestamp: Date.now(),
+      undo: () => {
+        this.state.layers = this.state.layers.filter(l => l.id !== layer.id);
+        this.state.activeLayerId = previousActive;
+        this.state.timelineConfig.durationFrames = previousDuration;
+      },
+      redo: insert,
+    });
+    this.state.isDirty = true;
+    return layer;
+  }
+
+  /**
+   * Replace a generator layer's source with undo history. `mutate` receives the
+   * current source and returns the next one (or the browser-acknowledged one).
+   */
+  updateGeneratorSource(
+    layerId: string,
+    description: string,
+    mutate: (source: MCPGeneratorSource) => MCPGeneratorSource,
+  ): MCPGeneratorSource {
+    const layer = this.requireGeneratorLayer(layerId);
+    const previous = layer.generator;
+    const next = normalizeGeneratorSource(mutate(previous));
+    if (JSON.stringify(previous) === JSON.stringify(next)) return previous;
+    const apply = (source: MCPGeneratorSource) => {
+      const target = this.state.layers.find(l => l.id === layerId);
+      if (target) target.generator = source;
+    };
+    apply(next);
+    this.ensureTimelineContains(next.startFrame + next.durationFrames - 1);
+    for (const track of next.propertyTracks) {
+      for (const kf of track.keyframes) this.ensureTimelineContains(kf.frame);
+    }
+    this.pushHistory({
+      type: 'generator_update',
+      description,
+      timestamp: Date.now(),
+      undo: () => apply(previous),
+      redo: () => apply(next),
+    });
+    this.state.isDirty = true;
+    return next;
+  }
+
+  /** Replace a whole layer (e.g. after a browser bake) with undo history */
+  replaceLayer(layerId: string, description: string, nextLayer: MCPLayer): MCPLayer {
+    const index = this.state.layers.findIndex(l => l.id === layerId);
+    if (index === -1) throw new Error(`Layer not found: ${layerId}`);
+    const previous = this.state.layers[index];
+    const next = structuredClone(nextLayer);
+    const apply = (layer: MCPLayer) => {
+      const i = this.state.layers.findIndex(l => l.id === layerId);
+      if (i !== -1) this.state.layers[i] = layer;
+    };
+    apply(next);
+    this.pushHistory({
+      type: 'layer_replace',
+      description,
+      timestamp: Date.now(),
+      undo: () => apply(previous),
+      redo: () => apply(next),
+    });
+    this.state.isDirty = true;
+    return next;
+  }
+
+  // ==========================================================================
   // History Operations
   // ==========================================================================
   
@@ -1529,6 +1700,9 @@ export class ProjectStateManager {
       })),
       effectTracks: l.effectTracks,
       staticProperties: l.staticProperties,
+      ...(l.kind === 'generator' && l.generator
+        ? { kind: 'generator' as const, generator: normalizeGeneratorSource(l.generator) }
+        : {}),
     }));
     this.state.layerGroups = (validated.layerGroups ?? []).map(g => ({
       id: g.id,
@@ -1601,8 +1775,9 @@ export class ProjectStateManager {
   }
 
   toSessionDataV2(): SessionDataV2 {
+    const hasGenerators = this.state.layers.some(l => isGeneratorLayer(l));
     return {
-      version: '2.0.0',
+      version: hasGenerators ? '2.2.0' : '2.0.0',
       name: this.state.name,
       description: this.state.description || undefined,
       canvas: {
@@ -1627,6 +1802,9 @@ export class ProjectStateManager {
         })),
         effectTracks: l.effectTracks,
         staticProperties: l.staticProperties,
+        ...(isGeneratorLayer(l)
+          ? { kind: 'generator' as const, generator: structuredClone(l.generator!) }
+          : {}),
       })),
       layerGroups: this.state.layerGroups.map(g => ({
         id: g.id, name: g.name, childLayerIds: g.childLayerIds,

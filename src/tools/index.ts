@@ -14,6 +14,7 @@ export { registerSelectionTools } from './selection.js';
 export { registerExportTools } from './export.js';
 export { registerEffectsTools } from './effects.js';
 export { registerGeneratorTools } from './generators.js';
+export { registerProceduralGeneratorTools } from './procedural-generators.js';
 export { registerAdditionalExportTools } from './export-additions.js';
 export { registerImportTools } from './import.js';
 export { registerPaletteTools } from './palettes.js';

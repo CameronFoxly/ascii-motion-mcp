@@ -25,6 +25,15 @@ interface BrowserCommandApplied {
   cellsChanged?: number;
   frameRate?: number;
   durationMs?: number;
+  // Procedural generator commands
+  layerId?: string;
+  generator?: SerializedGeneratorSource;   // full source after the change
+  layer?: unknown;                         // snapshot-serialized layer (add/bake)
+  trackId?: string;
+  keyframeIds?: string[];
+  generatorCatalog?: GeneratorCatalogEntry[];
+  generatorFrames?: GeneratorRenderedFrame[];
+  resolvedSettings?: Record<string, unknown>;
 }
 
 interface BrowserCommandResult {
@@ -122,6 +131,60 @@ its version-aware v1/v2 loader, wait until all stores contain the loaded
 project, then acknowledge. The MCP server requests a final state snapshot
 after the acknowledgement to reconcile its mirror with browser-normalized
 state.
+
+## Procedural generator commands
+
+Generator layers (Ascii-Motion 2.2+) are edited browser-first. Every mutating
+command records exactly one in-app undo entry and returns the resulting source
+in `applied.generator` (or the full layer in `applied.layer` for add/bake),
+which the MCP mirror adopts verbatim. Invalid input (unknown layer, non-generator
+layer, unknown generator type or property path, wrong value type) is rejected
+with `success: false`.
+
+```ts
+type SerializedGeneratorSource = {
+  id: string;
+  generatorType: string;
+  startFrame: number;
+  durationFrames: number;
+  enabled: boolean;
+  settings: Record<string, unknown>;
+  propertyTracks: Array<{
+    id: string;
+    propertyPath: string;
+    loopKeyframes?: boolean;
+    keyframes: Array<{ id: string; frame: number; value: unknown; easing: EasingCurve }>;
+  }>;
+};
+
+type GeneratorRenderedFrame = {
+  frame: number;
+  inRange: boolean;
+  text: string[]; // one row per canvas row, padded to canvas width
+  cellCount: number;
+  cells?: Array<{ x: number; y: number; char: string; color: string; bgColor: string }>;
+};
+```
+
+| Command | Payload | Result |
+|---|---|---|
+| `get_generator_catalog` | `{}` | `generatorCatalog` (registry entries with property definitions and canvas-aware `initialSettings`) |
+| `add_generator_layer` | `{ generatorType, name?, startFrame?, durationFrames?, settings? }` | `layerId`, `layer`, `generator` |
+| `update_generator_layer` | `{ layerId, settings?, startFrame?, durationFrames?, shiftKeyframes?, enabled?, name? }` | `generator` |
+| `set_generator_property` | `{ layerId, propertyPath, value, frame?, applyEffectDefaults? }` | `generator` (edit-at-playhead semantics; Animated Text unit conversion and typewriter defaults) |
+| `set_generator_keyframes` | `{ layerId, propertyPath, keyframes: [{ frame, value, easing? }], replace?, loop? }` | `generator`, `trackId`, `keyframeIds` |
+| `remove_generator_keyframes` | `{ layerId, propertyPath, frames?, keyframeIds?, clearTrack?, frame? }` | `generator` (an emptied track is removed; its value at `frame` becomes static) |
+| `reset_generator` | `{ layerId }` | `generator` (seed kept, keyframes cleared) |
+| `randomize_generator_seed` | `{ layerId, frame? }` | `generator` (rejected for generators without a seed) |
+| `get_generator_state` | `{ layerId, frame? }` | `generator`, `resolvedSettings` (non-mutating) |
+| `render_generator_frames` | `{ layerId, frames (≤ 60), includeCells? }` | `generatorFrames` (generator output only; non-mutating) |
+| `bake_generator_layer` | `{ layerId }` | `layerId`, `layer` (now a content layer) |
+
+`easing` accepts an `EasingCurve` object; the MCP server normalizes preset
+names before sending. App builds without these commands reply
+`Unsupported browser command: <type>`, which the MCP tools report as a request
+to update Ascii-Motion. Headless mode edits the same data locally (session
+format 2.2.0) but cannot render, preview, or bake generators.
 
 ## Batching and local-only mode
 

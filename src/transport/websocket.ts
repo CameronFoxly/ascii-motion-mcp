@@ -56,6 +56,21 @@ export interface BrowserCommandApplied {
   cellsChanged?: number;
   frameRate?: number;
   durationMs?: number;
+  /** Procedural generator commands (see docs/LIVE_SYNC_PROTOCOL.md) */
+  layerId?: string;
+  generator?: unknown;
+  layer?: unknown;
+  trackId?: string;
+  keyframeIds?: string[];
+  generatorCatalog?: unknown[];
+  generatorFrames?: Array<{
+    frame: number;
+    inRange: boolean;
+    text: string[];
+    cellCount: number;
+    cells?: Array<{ x: number; y: number; char: string; color: string; bgColor: string }>;
+  }>;
+  resolvedSettings?: Record<string, unknown>;
 }
 
 export interface BrowserCommandResult {

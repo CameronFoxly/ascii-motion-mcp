@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 import { type Cell } from '../types.js';
+import { assertActiveLayerAcceptsCells } from '../live-sync.js';
 
 // Character sets for different generators
 const MATRIX_CHARS = 'ｦｱｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789';
@@ -27,7 +28,8 @@ export function registerGeneratorTools(server: McpServer): void {
   // ==========================================================================
   server.tool(
     'run_generator',
-    'Generate procedural animation frames. Creates new frames with animated patterns.',
+    'Generate procedural animation frames as baked, static cells (legacy). For live, keyframeable generator layers ' +
+    '(Ascii-Motion 2.2+), use add_generator_layer / add_animated_text instead.',
     {
       generator: z.enum(['digital-rain', 'radio-waves', 'turbulent-noise', 'particle-physics', 'rain-drops', 'static-noise', 'gradient'])
         .describe('Generator type'),
@@ -74,6 +76,14 @@ export function registerGeneratorTools(server: McpServer): void {
       replaceFrames, seed,
     }) => {
       const pm = getProjectManager();
+      try {
+        assertActiveLayerAcceptsCells(pm);
+      } catch (error) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: (error as Error).message }) }],
+          isError: true,
+        };
+      }
       const state = pm.getState();
       const { width, height } = state;
       
