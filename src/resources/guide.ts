@@ -79,7 +79,7 @@ Use consistent colors to convey meaning:
 8. describe_animation() to verify
 `;
 
-const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.2.0)
+const TOOL_CATEGORIES_GUIDE = `# ASCII Motion MCP Tool Categories (v2.3.0)
 
 ## Canvas Editing
 - set_cell - Set character and colors at position

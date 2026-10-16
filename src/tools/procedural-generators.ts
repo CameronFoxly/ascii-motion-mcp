@@ -1,7 +1,7 @@
 /**
  * Procedural Generator Layer Tools
  *
- * Ascii-Motion 2.2.0+ generators are live, keyframeable layers: a generator
+ * Ascii-Motion generators (session format 2.2.0; MCP commands need app 2.2.5+) are live, keyframeable layers: a generator
  * source (type + static settings + keyframed property tracks + visible span)
  * renders every frame on demand instead of baking cells.
  *
@@ -65,7 +65,7 @@ const MAX_RENDER_FRAMES = 60;
 
 export const UPDATE_APP_MESSAGE =
   'The connected Ascii-Motion build does not support procedural generator commands. ' +
-  'Update Ascii-Motion to a version with MCP generator support (reload the app), ' +
+  'Update Ascii-Motion to 2.2.5 or later (reload the app), ' +
   'or disconnect the browser to edit the project headlessly.';
 
 const LIVE_ONLY_RENDER_MESSAGE =

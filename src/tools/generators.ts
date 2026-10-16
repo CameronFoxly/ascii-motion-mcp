@@ -29,7 +29,7 @@ export function registerGeneratorTools(server: McpServer): void {
   server.tool(
     'run_generator',
     'Generate procedural animation frames as baked, static cells (legacy). For live, keyframeable generator layers ' +
-    '(Ascii-Motion 2.2+), use add_generator_layer / add_animated_text instead.',
+    '(Ascii-Motion 2.2.5+), use add_generator_layer / add_animated_text instead.',
     {
       generator: z.enum(['digital-rain', 'radio-waves', 'turbulent-noise', 'particle-physics', 'rain-drops', 'static-noise', 'gradient'])
         .describe('Generator type'),
