@@ -30,6 +30,7 @@ import {
   registerExportTools,
   registerEffectsTools,
   registerGeneratorTools,
+  registerProceduralGeneratorTools,
   registerAdditionalExportTools,
   registerImportTools,
   registerPaletteTools,
@@ -183,6 +184,7 @@ async function main(): Promise<void> {
   registerExportTools(server);
   registerEffectsTools(server);
   registerGeneratorTools(server);
+  registerProceduralGeneratorTools(server);
   registerAdditionalExportTools(server);
   registerImportTools(server);
   registerPaletteTools(server);

@@ -120,13 +120,12 @@ Configuration:
 - Colors: ${c}
 
 Steps:
-1. Create a new project with new_project (${w}x${h})
-2. Use run_generator with type "digital-rain" and these settings:
-   - characterSet: Use Japanese-inspired characters or alphanumerics
-   - density: ${d}
-   - colorScheme: ${c}
-3. Generate enough frames for smooth looping (16-24 frames)
-4. Preview with describe_animation
+1. Create a new project with new_project (${w}x${h}) and add_layer so it uses the layer timeline
+2. Call list_generator_types with generatorType "digital-rain" to see its property paths
+3. Use add_generator_layer with generatorType "digital-rain" (live, keyframeable), tuning
+   spawn/trail settings for density ~${d} and mapping colors for a ${c} scheme
+4. Optionally animate properties with set_generator_keyframes; preview with render_generator_frames (live browser)
+   (Without Ascii-Motion connected, run_generator with type "digital-rain" bakes static frames instead)
 5. Export as animated GIF or HTML`,
           },
         }],

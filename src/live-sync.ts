@@ -3,7 +3,7 @@ import {
   getProjectManager,
   type ProjectStateManager,
 } from './state.js';
-import type { Cell } from './types.js';
+import { isGeneratorLayer, type Cell } from './types.js';
 import type {
   BrowserCommand,
   BrowserCommandFactory,
@@ -73,6 +73,18 @@ export async function requestBrowserCommand(
   return result;
 }
 
+/** Cell edits target the active layer; generator layers have no editable cells */
+export function assertActiveLayerAcceptsCells(projectManager: ProjectStateManager = getProjectManager()): void {
+  const layer = projectManager.isLayerMode() ? projectManager.getActiveLayer() : null;
+  if (layer && isGeneratorLayer(layer)) {
+    throw new Error(
+      `Active layer "${layer.name}" is a procedural generator layer and has no editable cells. ` +
+      'Use set_active_layer to pick a content layer (or add_layer), edit the generator with ' +
+      'update_generator_layer / set_generator_property, or bake it with bake_generator_layer.',
+    );
+  }
+}
+
 export async function requireFreshBrowserState(): Promise<boolean> {
   if (!browserCommandCallback) return false;
   const refreshed = await ensureFreshBrowserState();
@@ -95,6 +107,7 @@ export async function applyExactCellChanges({
   projectManager = getProjectManager(),
   beforePrepare,
 }: ApplyExactCellChangesOptions): Promise<ApplyExactCellChangesResult> {
+  assertActiveLayerAcceptsCells(projectManager);
   if (frameIndex !== undefined && !projectManager.hasCellFrame(frameIndex)) {
     throw new Error(`Frame index ${frameIndex} out of range`);
   }

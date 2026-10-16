@@ -70,6 +70,16 @@ const RegionSchema = z.object({
   height: z.number().int().min(1).optional(),
 }).optional();
 
+/** Preview tools read flattened cell frames; procedural generators render in the app */
+function generatorNote(): { generatorNote?: string } {
+  const count = getProjectManager().getGeneratorLayers().length;
+  if (count === 0) return {};
+  return {
+    generatorNote: `${count} procedural generator layer(s) are not included in this cell preview. ` +
+      'Use render_generator_frames (live) to see generator output.',
+  };
+}
+
 export function registerPreviewTools(server: McpServer): void {
   // ==========================================================================
   // get_canvas_summary - Very compact overview (~30 tokens)
@@ -104,6 +114,7 @@ export function registerPreviewTools(server: McpServer): void {
               height: state.height,
               isEmpty: true,
               cellCount: 0,
+              ...generatorNote(),
             }) 
           }],
         };
@@ -142,6 +153,7 @@ export function registerPreviewTools(server: McpServer): void {
               height: maxY - minY + 1,
             },
             topCharacters: topChars,
+            ...generatorNote(),
           }) 
         }],
       };
@@ -278,6 +290,7 @@ export function registerPreviewTools(server: McpServer): void {
               isEmpty: true, 
               ascii: '',
               hint: 'Canvas is empty. Draw some characters first with set_cell or paste_ascii_block.',
+              ...generatorNote(),
             }) 
           }],
         };
@@ -329,6 +342,7 @@ export function registerPreviewTools(server: McpServer): void {
           text: JSON.stringify({
             bounds: { x: renderX, y: renderY, width: renderWidth, height: renderHeight },
             ascii: lines.join('\n'),
+            ...generatorNote(),
           }) 
         }],
       };

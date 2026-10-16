@@ -290,6 +290,25 @@ export const EffectTrackSchema = z.object({
 export type MCPEffectTrack = z.infer<typeof EffectTrackSchema>;
 
 /**
+ * Procedural generator source attached to a generator layer (Ascii-Motion 2.2.0+).
+ * Mirrors Ascii-Motion's SessionGeneratorSourceV2. Property tracks reuse effect
+ * keyframe primitives (absolute frames, easing, loopKeyframes).
+ */
+export const GeneratorSourceSchema = z.object({
+  id: z.string().describe('Unique generator source identifier'),
+  generatorType: z.string().describe('Generator type id (radio-waves, turbulent-noise, particle-physics, rain-drops, digital-rain, animated-text)'),
+  startFrame: z.number().int().min(0).describe('First visible frame (absolute)'),
+  durationFrames: z.number().int().min(1).describe('Visible span length; range is [startFrame, startFrame + durationFrames)'),
+  enabled: z.boolean().default(true).describe('Whether the generator renders'),
+  settings: z.record(z.string(), z.unknown()).describe('Static settings keyed by property path'),
+  propertyTracks: z.array(EffectPropertyTrackSchema).describe('Keyframed generator properties'),
+});
+export type MCPGeneratorSource = z.infer<typeof GeneratorSourceSchema>;
+
+export const LayerKindSchema = z.enum(['content', 'generator']);
+export type LayerKind = z.infer<typeof LayerKindSchema>;
+
+/**
  * A layer in the composition.
  */
 export const LayerSchema = z.object({
@@ -305,6 +324,8 @@ export const LayerSchema = z.object({
   staticProperties: z.record(z.string(), z.number()).optional().describe('Non-keyframed property values'),
   parentGroupId: z.string().optional().describe('Parent group ID if in a group'),
   syncKeyframesToFrames: z.boolean().optional().describe('Sync keyframes when content frames move'),
+  kind: LayerKindSchema.optional().describe("Layer kind; absent means 'content'"),
+  generator: GeneratorSourceSchema.optional().describe('Procedural generator source (generator layers only)'),
 });
 export type MCPLayer = z.infer<typeof LayerSchema>;
 
@@ -338,7 +359,7 @@ export type TimelineConfig = z.infer<typeof TimelineConfigSchema>;
  * v2.0.0 Session data format with layer support.
  */
 export const SessionDataV2Schema = z.object({
-  version: z.enum(['2.0.0', '2.1.0']),
+  version: z.enum(['2.0.0', '2.1.0', '2.2.0']),
   name: z.string().optional(),
   description: z.string().optional(),
   metadata: z.object({
@@ -390,6 +411,8 @@ export const SessionDataV2Schema = z.object({
     effectTracks: z.array(EffectTrackSchema).optional(),
     staticProperties: z.record(z.string(), z.number()).optional(),
     syncKeyframesToFrames: z.boolean().optional(),
+    kind: LayerKindSchema.optional(),
+    generator: GeneratorSourceSchema.optional(),
   })),
 
   layerGroups: z.array(LayerGroupSchema).optional(),
@@ -409,6 +432,7 @@ export function detectSessionVersion(data: unknown): '1.0.0' | '2.0.0' | 'unknow
   const session = data as Record<string, unknown>;
   if (session.version === '2.0.0' && 'layers' in session) return '2.0.0';
   if (session.version === '2.1.0' && 'layers' in session) return '2.0.0';
+  if (session.version === '2.2.0' && 'layers' in session) return '2.0.0';
   if ('animation' in session) return '1.0.0';
   return 'unknown';
 }
@@ -467,6 +491,20 @@ export function generateEffectBlockId(): string {
  */
 export function generateEffectPropertyTrackId(): string {
   return `ept-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Generate a unique generator source ID.
+ */
+export function generateGeneratorSourceId(): string {
+  return `gen-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * True when a layer is a procedural generator layer.
+ */
+export function isGeneratorLayer(layer: { kind?: string; generator?: unknown } | undefined | null): boolean {
+  return !!layer && layer.kind === 'generator' && !!layer.generator;
 }
 
 // ============================================================================

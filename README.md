@@ -303,8 +303,15 @@ Once configured, try these prompts with your AI assistant:
 ### Effects Tools
 `apply_effect`, `get_color_stats`, `batch_recolor`, `batch_replace_char`
 
-### Generator Tools
-`run_generator`, `preview_generator`
+### Procedural Generator Layer Tools
+Live, keyframeable generator layers (Ascii-Motion 2.2+): radio waves, turbulent noise, particle physics, rain drops, digital rain, and animated text.
+
+`list_generator_types`, `get_generator_layers`, `add_generator_layer`, `add_animated_text`, `update_generator_layer`, `set_generator_property`, `set_generator_keyframes`, `remove_generator_keyframes`, `reset_generator`, `randomize_generator_seed`, `render_generator_frames` (live), `bake_generator_layer` (live)
+
+Every generator property can be keyframed with easing. In headless mode, generator layers are created, edited, and saved (session format 2.2.0) but not rendered; connect Ascii-Motion for rendering, previews, and baking. The bundled catalog is regenerated from an Ascii-Motion checkout with `npx tsx scripts/sync-generator-catalog.mts <ascii-motion-path>` (run from that checkout).
+
+### Legacy Generator Tools
+`run_generator`, `preview_generator` — bake procedural frames into static cells.
 
 ### Export Tools
 `export_text`, `export_json`, `export_session`, `export_html`, `export_react`, `export_ansi`, `export_ink`, `export_bubbletea`, `export_opentui`, `export_image`, `export_video`
