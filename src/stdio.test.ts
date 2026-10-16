@@ -171,6 +171,12 @@ async function initialize(session: RawSession) {
   });
 }
 
+function authToken(result: Record<string, unknown>): string | undefined {
+  const content = result.content as Array<{ text?: string }> | undefined;
+  const parsed = JSON.parse(content?.[0]?.text ?? '{}') as { token?: string };
+  return parsed.token;
+}
+
 async function availablePort() {
   const listener = createServer();
   await new Promise<void>((done, reject) => {
@@ -289,6 +295,8 @@ describe('real dual-era stdio entrypoint', () => {
     try {
       await client.connect(transport);
       await client.listTools();
+      expect(stderr).not.toContain('Live mode enabled');
+      await client.callTool({ name: 'get_auth_token', arguments: {} });
       expect(stderr.match(/Live mode enabled/g)).toHaveLength(1);
       expect(stderr).not.toContain('EADDRINUSE');
     } finally {
@@ -301,26 +309,46 @@ describe('real dual-era stdio entrypoint', () => {
       const port = await availablePort();
       const first = new RawSession(['--live', '--port', String(port)]);
       await initialize(first);
+      expect(authToken(await first.request('tools/call', { name: 'get_auth_token', arguments: {} }))).toBeTruthy();
       expect(await first.finish(signal)).toBe(0);
       const second = new RawSession(['--live', '--port', String(port)]);
       await initialize(second);
+      expect(authToken(await second.request('tools/call', { name: 'get_auth_token', arguments: {} }))).toBeTruthy();
       expect(await second.finish()).toBe(0);
     });
   }
 
-  it('fails cleanly on an occupied live port without protocol stdout noise', async () => {
+  it('keeps idle sessions off the live port', async () => {
+    const port = await availablePort();
+    const idle = new RawSession(['--live', '--port', String(port)]);
+    await initialize(idle);
+    await idle.request('tools/list');
+    const active = new RawSession(['--live', '--port', String(port)]);
+    await initialize(active);
+    expect(authToken(await active.request('tools/call', { name: 'get_auth_token', arguments: {} }))).toBeTruthy();
+    expect(idle.stderr).not.toContain('Live mode enabled');
+    expect(await idle.finish()).toBe(0);
+    expect(await active.finish()).toBe(0);
+  });
+
+  it('reports an occupied live port without exiting, then takes it over once free', async () => {
     const port = await availablePort();
     const first = new RawSession(['--live', '--port', String(port)]);
     await initialize(first);
+    await first.request('tools/call', { name: 'get_auth_token', arguments: {} });
     const second = new RawSession(['--live', '--port', String(port)]);
-    const request = second.request('initialize', {
-      protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'conflict', version: '1' },
-    });
-    await expect(request).rejects.toThrow();
-    expect(await second.exited).toBe(1);
-    expect(second.stderr).toMatch(/EADDRINUSE|address already in use/);
+    await initialize(second);
+    for (const name of ['get_auth_token', 'get_document_summary']) {
+      const busy = await second.request('tools/call', { name, arguments: {} });
+      expect(JSON.stringify(busy)).toMatch(new RegExp(`PORT_IN_USE|Port ${port} is in use`));
+    }
+    expect(second.child.exitCode).toBeNull();
+    expect(second.stderr.match(/is in use; live tools report PORT_IN_USE/g)).toHaveLength(1);
     expect(second.invalidStdout).toEqual([]);
     expect(await first.finish()).toBe(0);
+    expect(authToken(await second.request('tools/call', { name: 'get_auth_token', arguments: {} }))).toBeTruthy();
+    expect(second.stderr).toContain('Live mode enabled');
+    expect(await second.finish()).toBe(0);
   });
 
   it('validates CLI values and respects environment defaults with CLI precedence', async () => {

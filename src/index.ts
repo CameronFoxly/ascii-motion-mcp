@@ -21,6 +21,8 @@ import { McpServer } from './mcp.js';
 import { getProjectManager, setWebSocketBroadcaster, setEnsureFreshStateCallback } from './state.js';
 import { HybridTransport } from './transport/index.js';
 import { setBrowserCommandCallback } from './live-sync.js';
+import { configureBrowserBridge, setBrowserBridgeUnavailable } from './bridge.js';
+import { BrowserOperationError } from './transport/websocket.js';
 import {
   registerCanvasTools,
   registerFrameTools,
@@ -47,7 +49,6 @@ import {
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
-import { configureBrowserBridge } from './bridge.js';
 import { registerGeneratedOperationTools } from './tools/generated-operations.js';
 
 const { version } = JSON.parse(
@@ -217,65 +218,92 @@ async function main(): Promise<void> {
   getProjectManager();
 
   let hybridTransport: HybridTransport | null = null;
-  let liveStartup: Promise<void> | undefined;
+  let liveStartup: Promise<HybridTransport | null> | undefined;
+  let liveUnavailable: BrowserOperationError | undefined;
   let closing = false;
-  async function startLive(): Promise<void> {
-    if (!options.live || closing) return;
-    hybridTransport = new HybridTransport(options.port, '127.0.0.1');
 
-    // Set up WebSocket broadcaster for state changes
+  function portInUse(): BrowserOperationError {
+    return new BrowserOperationError('PORT_IN_USE',
+      `Port ${options.port} is in use, usually by the ascii-motion MCP server of another AI session ` +
+      'that already used ASCII Motion. Use ASCII Motion from that session, or end it; this server ' +
+      'retries the port on its next tool call. To run both, give this server a different --port and ' +
+      'set the same port in the app\'s MCP Connection dialog.');
+  }
+
+  // Bind the browser port on first real use rather than at initialize: hosts
+  // such as the GitHub Copilot app start one server per session, and idle
+  // sessions must not hold the port. A busy port is reported, not fatal.
+  async function bindLive(): Promise<HybridTransport | null> {
+    const candidate = new HybridTransport(options.port, '127.0.0.1');
+    try {
+      await candidate.startWebSocket();
+    } catch (error) {
+      await candidate.stopWebSocket().catch(() => undefined);
+      if ((error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
+      if (!liveUnavailable) {
+        console.error(`[ascii-motion-mcp] Port ${options.port} is in use; live tools report PORT_IN_USE until it frees up.`);
+      }
+      liveUnavailable = portInUse();
+      setBrowserBridgeUnavailable(liveUnavailable);
+      return null;
+    }
+    if (closing) {
+      await candidate.stopWebSocket().catch(() => undefined);
+      return null;
+    }
+    hybridTransport = candidate;
+    liveUnavailable = undefined;
+    setBrowserBridgeUnavailable(undefined);
+    configureBrowserBridge(candidate.wsServer);
+    candidate.wsServer.onStateSnapshot = (snapshot: unknown) => {
+      getProjectManager().loadFromBrowserSnapshot(snapshot);
+    };
+
+    console.error(`[ascii-motion-mcp] Live mode enabled`);
+    console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
+    console.error('[ascii-motion-mcp] Obtain this instance\'s token with get_auth_token in your MCP host.');
+    console.error(`[ascii-motion-mcp] Session ID: ${candidate.sessionId}`);
+    console.error('');
+    console.error(`[ascii-motion-mcp] Browser connect URL:`);
+    console.error(`  ws://127.0.0.1:${options.port}/?token=<token from get_auth_token>`);
+    return candidate;
+  }
+
+  async function ensureLive(): Promise<HybridTransport | null> {
+    if (!options.live || closing) return null;
+    if (hybridTransport) return hybridTransport;
+    liveStartup ??= bindLive().finally(() => { liveStartup = undefined; });
+    return liveStartup;
+  }
+
+  async function liveTransport(): Promise<HybridTransport> {
+    const live = await ensureLive();
+    if (!live) throw liveUnavailable ?? portInUse();
+    return live;
+  }
+
+  if (options.live) {
     setWebSocketBroadcaster((type, data) => {
       hybridTransport?.broadcastStateChange(type, data);
     });
-    setBrowserCommandCallback((command, timeoutMs, afterAcknowledged, prepareCommand) => {
-      return hybridTransport!.requestBrowserCommand(
+    setBrowserCommandCallback(async (command, timeoutMs, afterAcknowledged, prepareCommand) => {
+      return (await liveTransport()).requestBrowserCommand(
         command,
         timeoutMs,
         afterAcknowledged,
         prepareCommand,
       );
     });
-
-    // Start WebSocket server
-    await hybridTransport.startWebSocket();
-    configureBrowserBridge(hybridTransport.wsServer);
-
-    // Handle state snapshots from browser (syncs browser state to MCP)
-    hybridTransport.wsServer.onStateSnapshot = (snapshot: unknown) => {
-      const pm = getProjectManager();
-      pm.loadFromBrowserSnapshot(snapshot);
-    };
-
     const browserStateCallback = async (): Promise<boolean> => {
-      if (!hybridTransport) return false;
-      return hybridTransport.requestStateFromBrowser();
+      return (await liveTransport()).requestStateFromBrowser();
     };
-
-    const tokenCallback = async (): Promise<string|undefined> => {
-      if (!hybridTransport) return Promise.resolve(undefined);
-      return Promise.resolve(hybridTransport.authToken);
-    };
-
-    // Wire up the refresh_state_from_browser tool
     setSyncToolsBrowserStateCallback(browserStateCallback);
     setConnectionToolsBrowserStateCallback(browserStateCallback);
-    setRequestAuthTokenCallback(tokenCallback);
-
-    // Wire up auto-refresh for preview/inspection tools
+    setRequestAuthTokenCallback(async () => (await liveTransport()).authToken);
     setEnsureFreshStateCallback(browserStateCallback);
-
-    // Wire up browser-delegated export tools
-    setExportRequestCallback((request, timeoutMs) => {
-      return hybridTransport!.requestExportFromBrowser(request, timeoutMs);
+    setExportRequestCallback(async (request, timeoutMs) => {
+      return (await liveTransport()).requestExportFromBrowser(request, timeoutMs);
     });
-
-    console.error(`[ascii-motion-mcp] Live mode enabled`);
-    console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
-    console.error('[ascii-motion-mcp] Obtain this instance\'s token with get_auth_token in your MCP host.');
-    console.error(`[ascii-motion-mcp] Session ID: ${hybridTransport.sessionId}`);
-    console.error('');
-    console.error(`[ascii-motion-mcp] Browser connect URL:`);
-    console.error(`  ws://127.0.0.1:${options.port}/?token=<token from get_auth_token>`);
   }
 
   // Log startup (to stderr so it doesn't interfere with MCP protocol)
@@ -289,20 +317,21 @@ async function main(): Promise<void> {
     onerror: (error) => console.error('[ascii-motion-mcp] Protocol error:', error),
   });
 
-  // SDK auto-negotiation may spawn a disposable discovery process. Bind the
-  // process-owned browser bridge only once actual session traffic arrives.
+  // Discovery probes and idle sessions never bind. Messages stay ordered while
+  // a tool call or resource read waits for the first bind attempt.
   const dispatch = transport.onmessage;
+  let inbound = Promise.resolve();
   transport.onmessage = (message) => {
-    if (!('method' in message) || message.method === 'server/discover') {
-      dispatch?.(message);
-      return;
-    }
-    liveStartup ??= startLive();
-    void liveStartup.then(() => {
+    const binds = options.live && 'method' in message
+      && (message.method === 'tools/call' || message.method === 'resources/read');
+    inbound = inbound.then(async () => {
+      if (binds) {
+        await ensureLive().catch((error: unknown) => {
+          console.error('[ascii-motion-mcp] Live startup failed:', error);
+          void shutdown(1);
+        });
+      }
       if (!closing) dispatch?.(message);
-    }).catch((error: unknown) => {
-      console.error('[ascii-motion-mcp] Live startup failed:', error);
-      void shutdown(1);
     });
   };
 

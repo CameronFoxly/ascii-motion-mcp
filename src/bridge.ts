@@ -32,7 +32,14 @@ export function configureBrowserBridge(browser: WebSocketServerTransport | undef
   browser?.setMessageValidator(validateBridgeMessage);
 }
 
-export function isBrowserBridgeConfigured(): boolean { return transport !== undefined; }
+let unavailable: BrowserOperationError | undefined;
+
+/** Live mode is configured but the browser port could not be bound (for example, another session holds it). */
+export function setBrowserBridgeUnavailable(error: BrowserOperationError | undefined): void {
+  unavailable = error;
+}
+
+export function isBrowserBridgeConfigured(): boolean { return transport !== undefined || unavailable !== undefined; }
 
 export function markGeneratedTool(name: string): void { generatedToolNames.add(name); }
 
@@ -47,7 +54,10 @@ export async function executeBridgeOperation(
   } catch (error) {
     throw new BrowserOperationError('INVALID_INPUT', error instanceof Error ? error.message : String(error));
   }
-  if (!transport) return executeHeadlessOperation(name);
+  if (!transport) {
+    if (unavailable) throw unavailable;
+    return executeHeadlessOperation(name);
+  }
   const hello = transport.browserHello;
   if (!hello) {
     throw new BrowserOperationError('UNSUPPORTED',
