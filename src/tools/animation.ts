@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 import { parseCellKey, createCellKey, isInBounds, type Cell, type CanvasData } from '../types.js';
 
@@ -30,7 +30,7 @@ export function registerAnimationTools(server: McpServer): void {
       name: z.string().optional().describe('Name for the new frame'),
       duration: z.number().int().min(10).max(60000).optional().describe('Duration for the new frame'),
     },
-    async ({ sourceIndex, modifications, insertAtIndex: _insertAtIndex, name, duration }) => {
+    async ({ sourceIndex, modifications, insertAtIndex, name, duration }) => {
       const pm = getProjectManager();
       const state = pm.getState();
 
@@ -41,49 +41,32 @@ export function registerAnimationTools(server: McpServer): void {
         };
       }
 
-      // Duplicate the frame
-      const newFrame = pm.duplicateFrame(sourceIndex, false);
-      if (!newFrame) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'Failed to duplicate frame' }) }],
-          isError: true,
-        };
-      }
+      const source = state.frames[sourceIndex];
+      const newFrame = pm.addFrame(insertAtIndex ?? sourceIndex + 1,
+        structuredClone(source.data), duration ?? source.duration, false);
+      newFrame.name = name ?? `${source.name} (copy)`;
 
       // Find the new frame index
       const newIndex = pm.getState().frames.findIndex(f => f.id === newFrame.id);
 
-      // Navigate to the new frame to apply modifications
-      pm.goToFrame(newIndex);
-
-      // Apply modifications
       let modified = 0;
       for (const mod of modifications) {
         if (!isInBounds(mod.x, mod.y, state.width, state.height)) continue;
-
+        const key = `${mod.x},${mod.y}`;
         if (mod.clear) {
-          pm.clearCell(mod.x, mod.y, false);
+          delete newFrame.data[key];
         } else {
-          const current = pm.getCell(mod.x, mod.y);
-          pm.setCell(mod.x, mod.y, {
+          const current = newFrame.data[key] ?? { char: ' ', color: '#FFFFFF', bgColor: 'transparent' };
+          newFrame.data[key] = {
             char: mod.char ?? current.char,
             color: mod.color ?? current.color,
             bgColor: mod.bgColor ?? current.bgColor,
-          }, false);
+          };
         }
         modified++;
       }
 
-      // Set name and duration if provided
-      if (name) {
-        pm.setFrameName(newIndex, name, false);
-      }
-      if (duration) {
-        pm.setFrameDuration(newIndex, duration, false);
-      }
-
-      // Move frame if insertAtIndex differs from default position
-      // (For simplicity, we're not implementing reordering here - would need to add to state manager)
+      pm.goToFrame(pm.getActiveLayer()?.contentFrames[newIndex].startFrame ?? newIndex);
 
       const updatedState = pm.getState();
 
@@ -406,7 +389,8 @@ export function registerAnimationTools(server: McpServer): void {
 
       // Generate intermediate frames
       for (let i = 1; i <= steps; i++) {
-        const t = i / (steps + 1); // Progress from 0 to 1
+        const progress = i / (steps + 1);
+        const t = startFrame < endFrame ? progress : 1 - progress;
         const newFrameData: CanvasData = {};
 
         for (const key of allKeys) {
@@ -439,7 +423,7 @@ export function registerAnimationTools(server: McpServer): void {
         const avgDuration = Math.round((frameA.duration + frameB.duration) / 2);
 
         // Insert the new frame
-        const insertIndex = Math.max(startFrame, endFrame) + i;
+        const insertIndex = Math.min(startFrame, endFrame) + i;
         const newFrame = pm.addFrame(insertIndex, newFrameData, avgDuration, false);
         pm.setFrameName(pm.getState().frames.findIndex(f => f.id === newFrame.id), `Interpolated ${i}/${steps}`, false);
 

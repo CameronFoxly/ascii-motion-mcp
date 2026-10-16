@@ -7,6 +7,8 @@
  * v2.0.0: Supports both legacy frame-based projects and layer-based timeline projects.
  */
 
+import { z } from 'zod';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   type Cell,
   type Frame,
@@ -46,8 +48,57 @@ import {
   recordToMap,
   SessionDataSchema,
   SessionDataV2Schema,
+  LayerSchema,
+  LayerGroupSchema,
+  EffectTrackSchema,
+  CanvasDataSchema,
+  ToolStateSchema,
+  TypographySettingsSchema,
+  SelectionSchema,
 } from './types.js';
 import { normalizeGeneratorSource } from './generators/operations.js';
+
+const BrowserSnapshotSchema = z.object({
+  document: SessionDataV2Schema.optional(),
+  canvas: z.object({
+    width: z.number().int().min(4).max(200),
+    height: z.number().int().min(4).max(100),
+    backgroundColor: z.string().optional(),
+    cells: CanvasDataSchema.optional(),
+    showGrid: z.boolean().optional(),
+  }).optional(),
+  animation: z.object({
+    frames: z.array(z.object({
+      id: z.string(), name: z.string(), duration: z.number().positive(), data: CanvasDataSchema,
+    })),
+    currentFrameIndex: z.number().int().min(0),
+    frameRate: z.number().min(1).max(120).optional(),
+    looping: z.boolean().optional(),
+  }).optional(),
+  project: z.object({ name: z.string(), description: z.string().optional() }).optional(),
+  layers: z.array(LayerSchema).optional(),
+  layerGroups: z.array(LayerGroupSchema).optional(),
+  globalEffects: z.array(EffectTrackSchema).optional(),
+  timeline: z.object({
+    frameRate: z.number().min(1).max(120),
+    durationFrames: z.number().int().min(1),
+    looping: z.boolean().optional(),
+  }).optional(),
+  activeLayerId: z.string().nullable().optional(),
+  currentFrame: z.number().int().min(0).optional(),
+  tools: ToolStateSchema.optional(),
+  typography: TypographySettingsSchema.optional(),
+  selection: SelectionSchema.nullable().optional(),
+}).refine(data => !!(data.document || data.canvas || data.animation || data.layers),
+  'Snapshot must contain a document or state projection');
+
+const NativeSnapshotSchema = z.object({
+  document: SessionDataV2Schema,
+  activeLayerId: z.string().nullable().optional(),
+  currentFrame: z.number().int().min(0).optional(),
+  animation: z.object({ currentFrameIndex: z.number().int().min(0).optional() }).optional(),
+  selection: SelectionSchema.nullable().optional(),
+});
 
 // ============================================================================
 // History Entry Types
@@ -203,6 +254,8 @@ function createDefaultState(): ProjectState {
 
 export class ProjectStateManager {
   private state: ProjectState;
+  private nativeDocument: SessionDataV2 | null = null;
+  private completeBrowserDocument = false;
   
   constructor() {
     this.state = createDefaultState();
@@ -216,15 +269,57 @@ export class ProjectStateManager {
     return this.state;
   }
 
+  hasCompleteBrowserDocument(): boolean { return this.completeBrowserDocument; }
+
+  setProjectMetadata(updates: { name?: string; description?: string }): void {
+    if (updates.name !== undefined) this.state.name = updates.name;
+    if (updates.description !== undefined) this.state.description = updates.description;
+    this.state.isDirty = true;
+  }
+
   /**
    * Whether the project is in layer mode (v2 timeline).
    */
   isLayerMode(): boolean {
-    return this.state.layers.length > 0;
+    return this.nativeDocument !== null || this.state.layers.length > 0;
   }
 
   getCurrentFrame(): Frame {
-    return this.state.frames[this.state.currentFrameIndex];
+    return this.getFrameAtTime(this.state.currentFrameIndex);
+  }
+
+  getFrameAtTime(frame: number): Frame {
+    if (!Number.isInteger(frame) || frame < 0 || frame >= (
+      this.isLayerMode() ? this.state.timelineConfig.durationFrames : this.state.frames.length
+    )) throw new Error(`Timeline frame ${frame} is out of range`);
+    if (!this.isLayerMode()) return this.state.frames[frame];
+    const layer = this.getActiveLayer();
+    const contentFrame = layer && this.getContentFrameAtTime(layer, frame);
+    return contentFrame ? this.frameView(contentFrame) : {
+      id: '', name: `Timeline Frame ${frame + 1}`,
+      duration: 1000 / this.state.timelineConfig.frameRate, data: {},
+    };
+  }
+
+  private frameView(contentFrame: MCPContentFrame): Frame {
+    const frameRate = () => this.state.timelineConfig.frameRate;
+    return {
+      id: contentFrame.id,
+      get name() { return contentFrame.name; },
+      set name(name: string) { contentFrame.name = name; },
+      get duration() { return contentFrame.durationFrames * 1000 / frameRate(); },
+      set duration(duration: number) {
+        contentFrame.durationFrames = Math.max(1, Math.round(duration * frameRate() / 1000));
+      },
+      get data() { return contentFrame.data; },
+      set data(data: CanvasData) { contentFrame.data = data; },
+    };
+  }
+
+  private synchronizeFrameViews(): void {
+    if (this.isLayerMode()) {
+      this.state.frames = this.getActiveLayer()?.contentFrames.map(frame => this.frameView(frame)) ?? [];
+    }
   }
   
   getCurrentFrameData(): Map<string, Cell> {
@@ -235,6 +330,14 @@ export class ProjectStateManager {
   // Canvas Operations (work on active layer in layer mode)
   // ==========================================================================
   
+  private getEditableContentLayer(): MCPLayer {
+    const layer = this.getActiveLayer();
+    if (!layer) throw new Error('No active layer selected');
+    if (layer.locked) throw new Error(`Layer "${layer.name}" is locked`);
+    if (isGeneratorLayer(layer)) throw new Error(`Layer "${layer.name}" has generated content; select or create a content layer`);
+    return layer;
+  }
+
   getCell(x: number, y: number): Cell {
     if (!isInBounds(x, y, this.state.width, this.state.height)) {
       return EMPTY_CELL;
@@ -260,10 +363,9 @@ export class ProjectStateManager {
     const isEmpty = cell.char === ' ' && cell.color === '#FFFFFF' && cell.bgColor === 'transparent';
 
     if (this.isLayerMode()) {
-      const layer = this.getActiveLayer();
-      if (!layer || layer.locked) return false;
+      const layer = this.getEditableContentLayer();
       const cf = this.getActiveContentFrame();
-      if (!cf) return false;
+      if (!cf) throw new Error(`No content frame covers timeline frame ${this.state.currentFrameIndex}`);
       const previousCell = cf.data[key];
 
       if (recordHistory) {
@@ -304,10 +406,9 @@ export class ProjectStateManager {
     let description = `Set ${cells.length} cells`;
 
     if (this.isLayerMode()) {
-      const layer = this.getActiveLayer();
-      if (!layer || layer.locked) return 0;
+      const layer = this.getEditableContentLayer();
       const cf = this.getActiveContentFrame();
-      if (!cf) return 0;
+      if (!cf) throw new Error(`No content frame covers timeline frame ${this.state.currentFrameIndex}`);
       dataTarget = cf.data;
       description = `Set ${cells.length} cells on layer "${layer.name}"`;
     } else {
@@ -330,15 +431,14 @@ export class ProjectStateManager {
     let description = `Set ${cells.length} cells on frame ${frameIndex}`;
 
     if (this.isLayerMode()) {
-      const layer = this.getActiveLayer();
-      if (!layer || layer.locked) return 0;
+      const layer = this.getEditableContentLayer();
       const contentFrame = layer.contentFrames[frameIndex];
-      if (!contentFrame) return 0;
+      if (!contentFrame) throw new Error(`Content-frame index ${frameIndex} is out of range`);
       dataTarget = contentFrame.data;
       description = `Set ${cells.length} cells on frame ${frameIndex} of layer "${layer.name}"`;
     } else {
       const frame = this.state.frames[frameIndex];
-      if (!frame) return 0;
+      if (!frame) throw new Error(`Frame index ${frameIndex} is out of range`);
       dataTarget = frame.data;
     }
 
@@ -354,10 +454,9 @@ export class ProjectStateManager {
       return this.setCellsOnFrame(frameIndex, cells, recordHistory);
     }
 
-    const layer = this.getActiveLayer();
-    if (!layer || layer.locked) return 0;
+    const layer = this.getEditableContentLayer();
     const contentFrame = this.getContentFrameAtTime(layer, frameIndex);
-    if (!contentFrame) return 0;
+    if (!contentFrame) throw new Error(`No content frame covers timeline frame ${frameIndex}`);
     return this.setCellsInData(
       contentFrame.data,
       cells,
@@ -429,10 +528,9 @@ export class ProjectStateManager {
   
   clearCanvas(recordHistory = true): void {
     if (this.isLayerMode()) {
-      const layer = this.getActiveLayer();
-      if (!layer || layer.locked) return;
+      const layer = this.getEditableContentLayer();
       const cf = this.getActiveContentFrame();
-      if (!cf) return;
+      if (!cf) throw new Error(`No content frame covers timeline frame ${this.state.currentFrameIndex}`);
       const previousData = { ...cf.data };
       if (recordHistory) {
         this.pushHistory({
@@ -469,7 +567,22 @@ export class ProjectStateManager {
     width = Math.max(4, Math.min(200, width));
     height = Math.max(4, Math.min(100, height));
     
-    const previousFrameData = this.state.frames.map(f => ({ ...f.data }));
+    const frames = this.isLayerMode()
+      ? this.state.layers.flatMap(layer => layer.contentFrames)
+      : this.state.frames;
+    const previousFrameData = frames.map(f => ({ ...f.data }));
+    const clippedFrameData = frames.map(frame => Object.fromEntries(
+      Object.entries(frame.data).filter(([key]) => {
+        const { x, y } = parseCellKey(key);
+        return isInBounds(x, y, width, height);
+      }),
+    ));
+    const apply = (nextWidth: number, nextHeight: number, data: CanvasData[]): void => {
+      this.state.width = nextWidth;
+      this.state.height = nextHeight;
+      frames.forEach((frame, index) => { frame.data = { ...data[index] }; });
+      this.synchronizeFrameViews();
+    };
     
     if (recordHistory) {
       this.pushHistory({
@@ -477,35 +590,15 @@ export class ProjectStateManager {
         description: `Resize canvas to ${width}x${height}`,
         timestamp: Date.now(),
         undo: () => {
-          this.state.width = previousWidth;
-          this.state.height = previousHeight;
-          this.state.frames.forEach((frame, i) => { frame.data = previousFrameData[i]; });
+          apply(previousWidth, previousHeight, previousFrameData);
         },
         redo: () => {
-          this.state.width = width;
-          this.state.height = height;
-          this.state.frames.forEach(frame => {
-            const newData: CanvasData = {};
-            Object.entries(frame.data).forEach(([key, cell]) => {
-              const { x, y } = parseCellKey(key);
-              if (x < width && y < height) newData[key] = cell;
-            });
-            frame.data = newData;
-          });
+          apply(width, height, clippedFrameData);
         },
       });
     }
     
-    this.state.width = width;
-    this.state.height = height;
-    this.state.frames.forEach(frame => {
-      const newData: CanvasData = {};
-      Object.entries(frame.data).forEach(([key, cell]) => {
-        const { x, y } = parseCellKey(key);
-        if (x < width && y < height) newData[key] = cell;
-      });
-      frame.data = newData;
-    });
+    apply(width, height, clippedFrameData);
     this.state.isDirty = true;
   }
   
@@ -614,8 +707,68 @@ export class ProjectStateManager {
   // ==========================================================================
   // Legacy Frame Operations (v1 compat)
   // ==========================================================================
+
+  private editContentFrames(layer: MCPLayer, type: string, mutate: () => void, recordHistory: boolean): void {
+    const capture = () => ({
+      frames: layer.contentFrames.slice(),
+      timing: layer.contentFrames.map(frame => ({
+        frame, startFrame: frame.startFrame, durationFrames: frame.durationFrames,
+      })),
+      duration: this.state.timelineConfig.durationFrames,
+      playhead: this.state.currentFrameIndex,
+    });
+    const restore = (saved: ReturnType<typeof capture>): void => {
+      layer.contentFrames = saved.frames.slice();
+      for (const timing of saved.timing) {
+        timing.frame.startFrame = timing.startFrame;
+        timing.frame.durationFrames = timing.durationFrames;
+      }
+      this.state.timelineConfig.durationFrames = saved.duration;
+      this.state.currentFrameIndex = saved.playhead;
+      this.synchronizeFrameViews();
+    };
+    const before = capture();
+    mutate();
+    const after = capture();
+    if (recordHistory) this.pushHistory({
+      type, description: type.replaceAll('_', ' '), timestamp: Date.now(),
+      undo: () => restore(before), redo: () => restore(after),
+    });
+    this.synchronizeFrameViews();
+    this.state.isDirty = true;
+  }
   
   addFrame(atIndex?: number, canvasData?: CanvasData, duration?: number, recordHistory = true): Frame {
+    if (this.isLayerMode()) {
+      const layer = this.getActiveLayer();
+      if (!layer || layer.locked || isGeneratorLayer(layer)) {
+        throw new Error('Adding content requires an unlocked content layer');
+      }
+      const index = atIndex ?? layer.contentFrames.length;
+      if (!Number.isInteger(index) || index < 0 || index > layer.contentFrames.length) {
+        throw new Error('Content frame insertion index out of range');
+      }
+      const previous = layer.contentFrames[index - 1];
+      const startFrame = layer.contentFrames[index]?.startFrame
+        ?? (previous ? previous.startFrame + previous.durationFrames : this.state.currentFrameIndex);
+      const frame: MCPContentFrame = {
+        id: generateContentFrameId(), name: `Frame ${layer.contentFrames.length + 1}`,
+        startFrame,
+        durationFrames: Math.max(1, Math.round((duration ?? DEFAULT_FRAME_DURATION) * this.state.frameRate / 1000)),
+        data: structuredClone(canvasData ?? {}),
+      };
+      this.editContentFrames(layer, 'add_frame', () => {
+        for (const existing of layer.contentFrames) {
+          if (existing.startFrame >= startFrame) existing.startFrame += frame.durationFrames;
+        }
+        layer.contentFrames.splice(index, 0, frame);
+        this.state.timelineConfig.durationFrames = Math.max(
+          this.state.timelineConfig.durationFrames,
+          ...layer.contentFrames.map(item => item.startFrame + item.durationFrames),
+        );
+      }, recordHistory);
+      return this.frameView(frame);
+    }
     const newFrame: Frame = {
       id: generateFrameId(),
       name: `Frame ${this.state.frames.length + 1}`,
@@ -642,6 +795,15 @@ export class ProjectStateManager {
   }
   
   deleteFrame(index: number, recordHistory = true): boolean {
+    if (this.isLayerMode()) {
+      const layer = this.getActiveLayer();
+      if (!layer || layer.locked || isGeneratorLayer(layer) || !layer.contentFrames[index]) return false;
+      if (layer.contentFrames.length === 1) return false;
+      this.editContentFrames(layer, 'delete_frame', () => {
+        layer.contentFrames.splice(index, 1);
+      }, recordHistory);
+      return true;
+    }
     if (index < 0 || index >= this.state.frames.length) return false;
     if (this.state.frames.length === 1) return false;
     
@@ -671,6 +833,14 @@ export class ProjectStateManager {
   }
   
   duplicateFrame(index: number, recordHistory = true): Frame | null {
+    if (this.isLayerMode()) {
+      const source = this.getActiveLayer()?.contentFrames[index];
+      if (!source) return null;
+      const frame = this.addFrame(index + 1, source.data,
+        source.durationFrames * 1000 / this.state.frameRate, recordHistory);
+      frame.name = `${source.name} (copy)`;
+      return frame;
+    }
     if (index < 0 || index >= this.state.frames.length) return null;
     const sourceFrame = this.state.frames[index];
     const newFrame: Frame = {
@@ -742,7 +912,11 @@ export class ProjectStateManager {
             item.startFrame += frameDelta;
           }
         }
-        this.state.timelineConfig.durationFrames = Math.max(1, previousTimelineDuration + frameDelta);
+        const contentEnd = this.state.layers.reduce((end, candidate) => candidate.contentFrames.reduce(
+          (frameEnd, item) => Math.max(frameEnd, item.startFrame + item.durationFrames),
+          Math.max(end, candidate.generator ? candidate.generator.startFrame + candidate.generator.durationFrames : 0),
+        ), 1);
+        this.state.timelineConfig.durationFrames = Math.max(contentEnd, previousTimelineDuration + frameDelta);
         frame.duration = duration;
       };
 
@@ -824,13 +998,36 @@ export class ProjectStateManager {
   }
 
   addLayer(name?: string): MCPLayer {
+    if (!this.isLayerMode() && (
+      this.state.frames.length > 1
+      || this.state.frames.some(frame => Object.keys(frame.data).length > 0 || frame.name !== 'Frame 1')
+    )) {
+      let startFrame = 0;
+      const migrated = createDefaultLayer('Layer 1', this.state.width, this.state.height);
+      migrated.contentFrames = this.state.frames.map(frame => {
+        const durationFrames = Math.max(1, Math.round(frame.duration * this.state.frameRate / 1000));
+        const contentFrame: MCPContentFrame = {
+          id: frame.id, name: frame.name, startFrame, durationFrames,
+          data: structuredClone(frame.data),
+        };
+        startFrame += durationFrames;
+        return contentFrame;
+      });
+      this.state.layers.push(migrated);
+      this.state.timelineConfig = {
+        frameRate: this.state.frameRate,
+        durationFrames: Math.max(startFrame, this.state.timelineConfig.durationFrames),
+      };
+    }
     const layer = createDefaultLayer(
       name ?? `Layer ${this.state.layers.length + 1}`,
       this.state.width,
       this.state.height,
     );
+    layer.contentFrames[0].startFrame = this.state.currentFrameIndex;
     this.state.layers.push(layer);
     this.state.activeLayerId = layer.id;
+    this.synchronizeFrameViews();
     if (this.state.timelineConfig.durationFrames < 1) {
       this.state.timelineConfig.durationFrames = 12;
     }
@@ -850,6 +1047,7 @@ export class ProjectStateManager {
     if (this.state.activeLayerId === layerId) {
       this.state.activeLayerId = this.state.layers[Math.min(index, this.state.layers.length - 1)]?.id ?? null;
     }
+    this.synchronizeFrameViews();
     this.state.isDirty = true;
     return true;
   }
@@ -882,6 +1080,7 @@ export class ProjectStateManager {
     const sourceIndex = this.state.layers.findIndex(l => l.id === layerId);
     this.state.layers.splice(sourceIndex + 1, 0, newLayer);
     this.state.activeLayerId = newLayer.id;
+    this.synchronizeFrameViews();
     this.state.isDirty = true;
     return newLayer;
   }
@@ -889,6 +1088,7 @@ export class ProjectStateManager {
   setActiveLayer(layerId: string): boolean {
     if (!this.state.layers.find(l => l.id === layerId)) return false;
     this.state.activeLayerId = layerId;
+    this.synchronizeFrameViews();
     return true;
   }
 
@@ -970,6 +1170,7 @@ export class ProjectStateManager {
     };
     layer.contentFrames.push(cf);
     layer.contentFrames.sort((a, b) => a.startFrame - b.startFrame);
+    this.synchronizeFrameViews();
     if (startFrame + durationFrames > this.state.timelineConfig.durationFrames) {
       this.state.timelineConfig.durationFrames = startFrame + durationFrames;
     }
@@ -983,6 +1184,7 @@ export class ProjectStateManager {
     const index = layer.contentFrames.findIndex(cf => cf.id === contentFrameId);
     if (index < 0) return false;
     layer.contentFrames.splice(index, 1);
+    this.synchronizeFrameViews();
     this.state.isDirty = true;
     return true;
   }
@@ -1614,12 +1816,66 @@ export class ProjectStateManager {
       redoDescription: this.canRedo() ? this.state.historyStack[this.state.historyIndex + 1].description : null,
     };
   }
+
+  async transaction<T>(
+    description: string, work: () => Promise<T>, failed: (result: T) => boolean,
+  ): Promise<T> {
+    const capture = () => ({
+      document: this.toNativeSessionData(),
+      activeLayerId: this.state.activeLayerId,
+      frame: this.state.currentFrameIndex,
+      selection: structuredClone(this.state.selection),
+      filePath: this.state.filePath,
+      dirty: this.state.isDirty,
+    });
+    const history = this.state.historyStack.slice();
+    const historyIndex = this.state.historyIndex;
+    const before = capture();
+    const restore = (snapshot: ReturnType<typeof capture>): void => {
+      const currentHistory = this.state.historyStack;
+      const currentIndex = this.state.historyIndex;
+      this.loadFromUnknownSessionData(structuredClone(snapshot.document), snapshot.filePath ?? undefined);
+      if (snapshot.activeLayerId) this.setActiveLayer(snapshot.activeLayerId);
+      this.state.currentFrameIndex = snapshot.frame;
+      this.state.selection = structuredClone(snapshot.selection);
+      this.state.isDirty = snapshot.dirty;
+      this.state.historyStack = currentHistory;
+      this.state.historyIndex = currentIndex;
+    };
+    try {
+      const result = await work();
+      if (failed(result)) {
+        restore(before);
+        this.state.historyStack = history;
+        this.state.historyIndex = historyIndex;
+        return result;
+      }
+      const after = capture();
+      this.state.historyStack = history;
+      this.state.historyIndex = historyIndex;
+      if (JSON.stringify(before.document) !== JSON.stringify(after.document)) {
+        this.pushHistory({
+          type: 'tool_transaction', description, timestamp: Date.now(),
+          undo: () => restore(before), redo: () => restore(after),
+        });
+        this.state.isDirty = true;
+      }
+      return result;
+    } catch (error) {
+      restore(before);
+      this.state.historyStack = history;
+      this.state.historyIndex = historyIndex;
+      throw error;
+    }
+  }
   
   // ==========================================================================
   // Project Operations
   // ==========================================================================
   
   newProject(options?: { width?: number; height?: number; name?: string }): void {
+    this.nativeDocument = null;
+    this.completeBrowserDocument = false;
     this.state = createDefaultState();
     if (options?.width) this.state.width = Math.max(4, Math.min(200, options.width));
     if (options?.height) this.state.height = Math.max(4, Math.min(100, options.height));
@@ -1628,6 +1884,8 @@ export class ProjectStateManager {
   }
   
   loadFromSessionData(data: SessionData, filePath?: string): void {
+    this.nativeDocument = null;
+    this.completeBrowserDocument = false;
     const validated = SessionDataSchema.parse(data);
     this.state = createDefaultState();
     this.state.name = validated.name ?? 'Untitled Project';
@@ -1656,6 +1914,8 @@ export class ProjectStateManager {
 
   loadFromSessionDataV2(data: SessionDataV2, filePath?: string): void {
     const validated = SessionDataV2Schema.parse(data);
+    this.nativeDocument = structuredClone(validated);
+    this.completeBrowserDocument = false;
     this.state = createDefaultState();
     this.state.name = validated.name ?? 'Untitled Project';
     this.state.description = validated.description ?? '';
@@ -1671,6 +1931,7 @@ export class ProjectStateManager {
     this.state.frameRate = this.state.timelineConfig.frameRate;
     this.state.looping = validated.timeline.looping ?? true;
     this.state.layers = validated.layers.map(l => ({
+      ...l,
       id: l.id,
       name: l.name,
       visible: l.visible ?? true,
@@ -1680,18 +1941,22 @@ export class ProjectStateManager {
       parentGroupId: l.parentGroupId,
       syncKeyframesToFrames: l.syncKeyframesToFrames,
       contentFrames: l.contentFrames.map(cf => ({
+        ...cf,
         id: cf.id,
         name: cf.name,
         startFrame: cf.startFrame,
         durationFrames: cf.durationFrames,
         data: cf.data ?? {},
         hidden: cf.hidden,
+        labelColor: cf.labelColor,
       })),
       propertyTracks: l.propertyTracks.map(pt => ({
+        ...pt,
         id: pt.id,
         propertyPath: pt.propertyPath as PropertyPath,
         loopKeyframes: pt.loopKeyframes ?? false,
         keyframes: pt.keyframes.map(kf => ({
+          ...kf,
           id: kf.id,
           frame: kf.frame,
           value: kf.value,
@@ -1701,10 +1966,11 @@ export class ProjectStateManager {
       effectTracks: l.effectTracks,
       staticProperties: l.staticProperties,
       ...(l.kind === 'generator' && l.generator
-        ? { kind: 'generator' as const, generator: normalizeGeneratorSource(l.generator) }
+        ? { kind: 'generator' as const, generator: { ...l.generator, ...normalizeGeneratorSource(l.generator) } }
         : {}),
     }));
     this.state.layerGroups = (validated.layerGroups ?? []).map(g => ({
+      ...g,
       id: g.id,
       name: g.name,
       childLayerIds: g.childLayerIds,
@@ -1713,10 +1979,11 @@ export class ProjectStateManager {
       locked: g.locked ?? false,
       collapsed: g.collapsed ?? false,
       propertyTracks: g.propertyTracks?.map(pt => ({
+        ...pt,
         id: pt.id,
         propertyPath: pt.propertyPath as PropertyPath,
         loopKeyframes: pt.loopKeyframes ?? false,
-        keyframes: pt.keyframes.map(kf => ({ id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
+        keyframes: pt.keyframes.map(kf => ({ ...kf, id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
       })) ?? undefined,
       effectTracks: g.effectTracks,
       staticProperties: g.staticProperties,
@@ -1733,6 +2000,7 @@ export class ProjectStateManager {
     })) ?? [];
     if (this.state.frames.length === 0) this.state.frames = [createDefaultFrame()];
     this.state.currentFrameIndex = 0;
+    this.synchronizeFrameViews();
     if (validated.tools) this.state.toolState = { ...this.state.toolState, ...validated.tools };
     if (validated.typography) this.state.typography = { ...this.state.typography, ...validated.typography };
     this.state.historyStack = [];
@@ -1756,7 +2024,7 @@ export class ProjectStateManager {
   }
   
   toSessionData(): SessionData {
-    return {
+    return structuredClone({
       version: '1.0.0',
       name: this.state.name,
       description: this.state.description || undefined,
@@ -1771,34 +2039,43 @@ export class ProjectStateManager {
       },
       tools: this.state.toolState,
       typography: this.state.typography,
-    };
+    });
+  }
+
+  toNativeSessionData(): SessionData | SessionDataV2 {
+    return this.isLayerMode() || this.nativeDocument ? this.toSessionDataV2() : this.toSessionData();
   }
 
   toSessionDataV2(): SessionDataV2 {
-    const hasGenerators = this.state.layers.some(l => isGeneratorLayer(l));
-    return {
-      version: hasGenerators ? '2.2.0' : '2.0.0',
+    return structuredClone({
+      ...this.nativeDocument,
+      version: this.getGeneratorLayers().length ? '2.2.0' : this.nativeDocument?.version ?? '2.2.0',
       name: this.state.name,
       description: this.state.description || undefined,
       canvas: {
+        ...this.nativeDocument?.canvas,
         width: this.state.width, height: this.state.height,
         canvasBackgroundColor: this.state.backgroundColor, showGrid: this.state.showGrid,
       },
       timeline: {
+        ...this.nativeDocument?.timeline,
         frameRate: this.state.timelineConfig.frameRate,
         durationFrames: this.state.timelineConfig.durationFrames,
         looping: this.state.looping,
       },
       layers: this.state.layers.map(l => ({
+        ...l,
         id: l.id, name: l.name, visible: l.visible, solo: l.solo, locked: l.locked, opacity: l.opacity,
         parentGroupId: l.parentGroupId, syncKeyframesToFrames: l.syncKeyframesToFrames,
         contentFrames: l.contentFrames.map(cf => ({
+          ...cf,
           id: cf.id, name: cf.name, startFrame: cf.startFrame, durationFrames: cf.durationFrames,
-          data: cf.data, hidden: cf.hidden,
+          data: cf.data, hidden: cf.hidden, labelColor: cf.labelColor,
         })),
         propertyTracks: l.propertyTracks.map(pt => ({
+          ...pt,
           id: pt.id, propertyPath: pt.propertyPath, loopKeyframes: pt.loopKeyframes,
-          keyframes: pt.keyframes.map(kf => ({ id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
+          keyframes: pt.keyframes.map(kf => ({ ...kf, id: kf.id, frame: kf.frame, value: kf.value, easing: kf.easing })),
         })),
         effectTracks: l.effectTracks,
         staticProperties: l.staticProperties,
@@ -1807,6 +2084,7 @@ export class ProjectStateManager {
           : {}),
       })),
       layerGroups: this.state.layerGroups.map(g => ({
+        ...g,
         id: g.id, name: g.name, childLayerIds: g.childLayerIds,
         visible: g.visible, solo: g.solo, locked: g.locked, collapsed: g.collapsed,
         propertyTracks: g.propertyTracks, effectTracks: g.effectTracks, staticProperties: g.staticProperties,
@@ -1814,7 +2092,7 @@ export class ProjectStateManager {
       globalEffects: this.state.globalEffects,
       tools: this.state.toolState,
       typography: this.state.typography,
-    };
+    });
   }
   
   // ==========================================================================
@@ -1822,35 +2100,36 @@ export class ProjectStateManager {
   // ==========================================================================
   
   loadFromBrowserSnapshot(snapshot: unknown): void {
-    const data = snapshot as {
-      canvas?: {
-        width: number; height: number; backgroundColor?: string;
-        cells?: Record<string, { char: string; color: string; bgColor: string }>;
-      };
-      animation?: {
-        frames: Array<{
-          id: string; name: string; duration: number;
-          data: Record<string, { char: string; color: string; bgColor: string }>;
-        }>;
-        currentFrameIndex: number;
-        frameRate?: number;
-        looping?: boolean;
-      };
-      project?: { name: string };
-      layers?: MCPLayer[];
-      layerGroups?: MCPLayerGroup[];
-      timeline?: { frameRate: number; durationFrames: number; looping?: boolean };
-      activeLayerId?: string;
-    };
-    if (!data) return;
+    const native = NativeSnapshotSchema.safeParse(snapshot);
+    if (native.success) {
+      const data = native.data;
+      const filePath = this.state.filePath;
+      this.loadFromSessionDataV2(data.document, filePath ?? undefined);
+      this.completeBrowserDocument = true;
+      if (data.activeLayerId && this.getLayer(data.activeLayerId)) this.setActiveLayer(data.activeLayerId);
+      this.goToFrame(data.currentFrame ?? data.animation?.currentFrameIndex ?? 0);
+      if (data.selection !== undefined) this.state.selection = data.selection;
+      return;
+    }
+    const data = BrowserSnapshotSchema.parse(snapshot);
+    this.nativeDocument = null;
+    this.completeBrowserDocument = false;
     console.error('[state] Loading state from browser snapshot');
     if (data.canvas) {
       this.state.width = data.canvas.width ?? this.state.width;
       this.state.height = data.canvas.height ?? this.state.height;
       this.state.backgroundColor = data.canvas.backgroundColor ?? this.state.backgroundColor;
+      this.state.showGrid = data.canvas.showGrid ?? this.state.showGrid;
     }
-    if (data.project?.name) this.state.name = data.project.name;
-    if (data.layers && data.layers.length > 0) {
+    if (data.project) {
+      this.state.name = data.project.name;
+      if (data.project.description !== undefined) this.state.description = data.project.description;
+    }
+    if (data.tools) this.state.toolState = data.tools;
+    if (data.typography) this.state.typography = data.typography;
+    if (data.selection !== undefined) this.state.selection = data.selection;
+    if (data.globalEffects) this.state.globalEffects = data.globalEffects;
+    if (data.layers) {
       this.state.layers = data.layers;
       this.state.layerGroups = data.layerGroups ?? [];
       this.state.activeLayerId = data.activeLayerId ?? data.layers[0]?.id ?? null;
@@ -1866,7 +2145,7 @@ export class ProjectStateManager {
       // Don't return early — also load animation.frames below so
       // preview/export tools that read state.frames get valid data.
     }
-    if (data.animation?.frames && data.animation.frames.length > 0) {
+    if (data.animation?.frames) {
       this.state.frames = data.animation.frames.map((frame, index) => ({
         id: frame.id || generateFrameId(),
         name: frame.name || `Frame ${index + 1}`,
@@ -1875,7 +2154,7 @@ export class ProjectStateManager {
       }));
       const maxFrameIndex = this.isLayerMode()
         ? this.state.timelineConfig.durationFrames - 1
-        : this.state.frames.length - 1;
+        : Math.max(0, this.state.frames.length - 1);
       this.state.currentFrameIndex = Math.min(data.animation.currentFrameIndex ?? 0, maxFrameIndex);
       if (data.animation.frameRate !== undefined) {
         this.state.frameRate = data.animation.frameRate;
@@ -1885,6 +2164,7 @@ export class ProjectStateManager {
       console.error(`[state] Loaded ${this.state.frames.length} frames from browser`);
     }
 
+    this.synchronizeFrameViews();
     // Ingest canvas.cells from the snapshot (companion PR #94).
     // The browser sends the current frame's live cell data in canvas.cells.
     // Merge it into the current frame so preview/export tools see fresh data.
@@ -1916,8 +2196,17 @@ export class ProjectStateManager {
 // ============================================================================
 
 let projectManager: ProjectStateManager | null = null;
+const localProjects = new AsyncLocalStorage<ProjectStateManager>();
+
+export function withLocalProject<T>(manager: ProjectStateManager, work: () => Promise<T>): Promise<T> {
+  return localProjects.run(manager, work);
+}
+
+export function isLocalProjectContext(): boolean { return localProjects.getStore() !== undefined; }
 
 export function getProjectManager(): ProjectStateManager {
+  const local = localProjects.getStore();
+  if (local) return local;
   if (!projectManager) projectManager = new ProjectStateManager();
   return projectManager;
 }
@@ -1938,6 +2227,7 @@ export function setWebSocketBroadcaster(broadcaster: BroadcasterFn): void {
 }
 
 export function broadcastStateChange(type: string, data: unknown): void {
+  if (isLocalProjectContext()) return;
   if (wsBroadcaster) wsBroadcaster(type, data);
 }
 
@@ -1967,6 +2257,9 @@ export function setEnsureFreshStateCallback(callback: FreshStateCallback | null)
  * from ProjectState.
  */
 export async function ensureFreshBrowserState(): Promise<boolean> {
+  if (isLocalProjectContext()) return false;
   if (!freshStateCallback) return false;
-  return freshStateCallback();
+  const refreshed = await freshStateCallback();
+  if (!refreshed) throw new Error('No browser connected or state refresh timed out');
+  return true;
 }

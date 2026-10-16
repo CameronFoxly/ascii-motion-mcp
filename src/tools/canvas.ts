@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
 import { isInBounds, type Cell } from '../types.js';
@@ -46,15 +46,14 @@ export function registerCanvasTools(server: McpServer): void {
       const pm = getProjectManager();
       const state = pm.getState();
       
-      // Switch frame if specified
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
       if (frameIndex !== undefined) {
-        if (frameIndex < 0 || frameIndex >= state.frames.length) {
+        if (frameIndex < 0 || frameIndex >= frameCount) {
           return {
-            content: [{ type: 'text', text: JSON.stringify({ error: `Frame index ${frameIndex} out of range (0-${state.frames.length - 1})` }) }],
+            content: [{ type: 'text', text: JSON.stringify({ error: `Frame index ${frameIndex} out of range (0-${frameCount - 1})` }) }],
             isError: true,
           };
         }
-        pm.goToFrame(frameIndex);
       }
       
       if (!isInBounds(x, y, state.width, state.height)) {
@@ -64,7 +63,8 @@ export function registerCanvasTools(server: McpServer): void {
         };
       }
       
-      const cell = pm.getCell(x, y);
+      const cell = frameIndex === undefined ? pm.getCell(x, y)
+        : pm.getFrameAtTime(frameIndex).data[`${x},${y}`] ?? { char: ' ', color: '#FFFFFF', bgColor: 'transparent' };
       
       return {
         content: [{ 

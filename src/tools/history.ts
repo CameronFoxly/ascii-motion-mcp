@@ -5,7 +5,7 @@
  */
 
 // z is used implicitly via McpServer
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange } from '../state.js';
 
 export function registerHistoryTools(server: McpServer): void {

@@ -5,7 +5,7 @@
  * These help users discover and invoke common workflows.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { z } from 'zod';
 
 export function registerPrompts(server: McpServer): void {
@@ -39,7 +39,7 @@ Requirements:
 - Frame rate: ~10 FPS (100ms per frame)
 
 Steps:
-1. First call new_project to create a ${w}x${h} canvas
+1. Inspect get_capabilities, then call new_project to create a ${w}x${h} canvas
 2. Design the animation frame by frame, using set_cells_batch for efficiency
 3. Use copy_frame_and_modify to create variations
 4. Preview with get_canvas_ascii between frames
@@ -120,13 +120,13 @@ Configuration:
 - Colors: ${c}
 
 Steps:
-1. Create a new project with new_project (${w}x${h}) and add_layer so it uses the layer timeline
+1. Create a new project with new_project (${w}x${h}) and inspect its active layer
 2. Call list_generator_types with generatorType "digital-rain" to see its property paths
 3. Use add_generator_layer with generatorType "digital-rain" (live, keyframeable), tuning
    spawn/trail settings for density ~${d} and mapping colors for a ${c} scheme
 4. Optionally animate properties with set_generator_keyframes; preview with render_generator_frames (live browser)
-   (Without Ascii-Motion connected, run_generator with type "digital-rain" bakes static frames instead)
-5. Export as animated GIF or HTML`,
+   (In headless mode, run_generator with generator "digital-rain" can bake compatibility frames instead)
+5. Export WebM or HTML using the current export catalog; GIF export is not supported`,
           },
         }],
       };
@@ -185,7 +185,7 @@ Steps:
     'apply-effects',
     'Apply visual effects to existing ASCII art',
     {
-      effectType: z.string().describe('Effect: colorize, invert, blur, outline, pixelate, static'),
+      effectType: z.string().describe('Effect type from get_catalog; compatibility baked effects also include invert and grayscale'),
       intensity: z.string().optional().describe('Effect intensity 0-1 (default: 0.5)'),
     },
     async ({ effectType, intensity }) => {
@@ -200,15 +200,13 @@ Steps:
 
 Steps:
 1. First check the current state with get_canvas_summary
-2. Apply the effect using apply_effect:
-   ${effectType === 'colorize' ? '- Change colors while preserving brightness' : ''}
-   ${effectType === 'invert' ? '- Invert characters and/or colors' : ''}
-   ${effectType === 'blur' ? '- Soften edges by using transitional characters' : ''}
-   ${effectType === 'outline' ? '- Add outline/border around existing art' : ''}
-   ${effectType === 'pixelate' ? '- Replace detailed areas with block characters' : ''}
-   ${effectType === 'static' ? '- Add TV static/noise effect' : ''}
-3. Use intensity ${i} (0 = subtle, 1 = maximum)
-4. Preview result with get_canvas_ascii`,
+2. Inspect get_catalog for effects and shaders; use the matching native operation
+   and an explicit owner/target. Do not invent a catalog type.
+   For compatibility baked invert or grayscale, use apply_effect with its effect argument.
+3. Map desired intensity ${i} to the actual named settings and ranges in the schema;
+   apply_effect has no generic intensity parameter.
+4. Preview character effects with get_canvas_ascii. Raster shaders require an image
+   or video export to inspect, and do not appear in character-cell reads.`,
           },
         }],
       };
@@ -244,7 +242,7 @@ Steps:
 2. Export using the appropriate tool:
    ${f === 'ink' ? '- Use export_ink to generate a React/Ink component' : ''}
    ${f === 'bubbletea' ? '- Use export_bubbletea to generate Go code' : ''}
-   ${f === 'opentui' ? '- Use export_opentui to generate Python code' : ''}
+   ${f === 'opentui' ? '- Use export_opentui for a TypeScript/TSX component in live mode (not Python)' : ''}
    ${f === 'ansi' ? '- Use export_ansi to get ANSI escape codes' : ''}
    ${f === 'plain' ? '- Use export_text for plain ASCII text' : ''}
 3. ${animate ? 'Enable animation support in the export' : 'Export static frame only'}

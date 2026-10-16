@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '../mcp.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExactCellChange } from '../live-sync.js';
 import { setBrowserCommandCallback } from '../live-sync.js';

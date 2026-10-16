@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
 import { ensureFreshBrowserState } from '../state.js';
 import { parseCellKey, type Cell, type Frame } from '../types.js';
@@ -39,6 +39,8 @@ export interface CanvasRenderState {
 export interface CanvasRenderDependencies {
   ensureFreshState: () => Promise<unknown>;
   getState: () => CanvasRenderState;
+  getFrameAtTime?: (frame: number) => Frame;
+  getFrameCount?: () => number;
 }
 
 export interface CanvasRenderLimits {
@@ -55,6 +57,15 @@ export interface CanvasRenderToolResult {
 const DEFAULT_CANVAS_RENDER_DEPENDENCIES: CanvasRenderDependencies = {
   ensureFreshState: ensureFreshBrowserState,
   getState: () => getProjectManager().getState(),
+  getFrameAtTime: frame => {
+    const pm = getProjectManager();
+    const sample = pm.getFrameAtTime(frame);
+    return pm.isLayerMode() ? { ...sample, duration: 1000 / pm.getState().frameRate } : sample;
+  },
+  getFrameCount: () => {
+    const pm = getProjectManager();
+    return pm.isLayerMode() ? pm.getState().timelineConfig.durationFrames : pm.getState().frames.length;
+  },
 };
 
 const DEFAULT_CANVAS_RENDER_LIMITS: CanvasRenderLimits = {
@@ -95,14 +106,15 @@ export function registerPreviewTools(server: McpServer): void {
       const pm = getProjectManager();
       const state = pm.getState();
       
-      if (frameIndex !== undefined && (frameIndex < 0 || frameIndex >= state.frames.length)) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameIndex !== undefined && (frameIndex < 0 || frameIndex >= frameCount)) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Frame index out of range' }) }],
           isError: true,
         };
       }
       
-      const frame = frameIndex !== undefined ? state.frames[frameIndex] : pm.getCurrentFrame();
+      const frame = pm.getFrameAtTime(frameIndex ?? state.currentFrameIndex);
       const cells = Object.entries(frame.data);
       
       if (cells.length === 0) {
@@ -186,20 +198,22 @@ export function registerPreviewTools(server: McpServer): void {
       frameIndex: z.number().int().optional().describe('Frame index (defaults to current)'),
       region: RegionSchema.describe('Region to preview (defaults to entire canvas)'),
       maxCells: z.number().int().min(1).max(1000).default(100).describe('Maximum cells to return'),
+      offset: z.number().int().min(0).default(0).describe('Cell offset from the previous page'),
     },
-    async ({ frameIndex, region, maxCells }) => {
+    async ({ frameIndex, region, maxCells, offset = 0 }) => {
       await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
-      if (frameIndex !== undefined && (frameIndex < 0 || frameIndex >= state.frames.length)) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameIndex !== undefined && (frameIndex < 0 || frameIndex >= frameCount)) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Frame index out of range' }) }],
           isError: true,
         };
       }
 
-      const frame = frameIndex !== undefined ? state.frames[frameIndex] : pm.getCurrentFrame();
+      const frame = pm.getFrameAtTime(frameIndex ?? state.currentFrameIndex);
       
       const regionX = region?.x ?? 0;
       const regionY = region?.y ?? 0;
@@ -207,31 +221,30 @@ export function registerPreviewTools(server: McpServer): void {
       const regionHeight = region?.height ?? state.height;
       
       const cells: Array<{ x: number; y: number; char: string; color: string; bgColor: string }> = [];
-      let truncated = false;
       
       for (const [key, cell] of Object.entries(frame.data)) {
         const { x, y } = parseCellKey(key);
         
         if (x >= regionX && x < regionX + regionWidth && y >= regionY && y < regionY + regionHeight) {
-          if (cells.length >= maxCells) {
-            truncated = true;
-            break;
-          }
           cells.push({ x, y, ...cell });
         }
       }
       
       // Sort by row, then column for readability
       cells.sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x);
+      const page = cells.slice(offset, offset + maxCells);
+      const nextOffset = offset + page.length < cells.length ? offset + page.length : null;
       
       return {
         content: [{ 
           type: 'text', 
           text: JSON.stringify({
             region: { x: regionX, y: regionY, width: regionWidth, height: regionHeight },
-            cellCount: cells.length,
-            truncated,
-            cells,
+            cellCount: page.length,
+            totalCells: cells.length,
+            truncated: nextOffset !== null,
+            nextOffset,
+            cells: page,
           }) 
         }],
       };
@@ -256,14 +269,15 @@ export function registerPreviewTools(server: McpServer): void {
       const state = pm.getState();
       
       const frameIdx = frameIndex ?? state.currentFrameIndex;
-      if (frameIdx < 0 || frameIdx >= state.frames.length) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameIdx < 0 || frameIdx >= frameCount) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Frame index out of range' }) }],
           isError: true,
         };
       }
       
-      const frame = state.frames[frameIdx];
+      const frame = pm.getFrameAtTime(frameIdx);
       const cells = Object.entries(frame.data);
       
       // Handle empty canvas
@@ -326,7 +340,7 @@ export function registerPreviewTools(server: McpServer): void {
             line += cell.char;
           } else if (overlayPreviousFrame && frameIdx > 0) {
             // Show previous frame content as placeholder
-            const prevFrame = state.frames[frameIdx - 1];
+            const prevFrame = pm.getFrameAtTime(frameIdx - 1);
             const prevCell = prevFrame.data[key];
             line += prevCell ? '·' : ' '; // Dim dot for previous frame content
           } else {
@@ -358,22 +372,24 @@ export function registerPreviewTools(server: McpServer): void {
     {
       frameA: z.number().int().describe('First frame index'),
       frameB: z.number().int().describe('Second frame index'),
-      maxCells: z.number().int().min(1).max(500).default(100).describe('Maximum cells to return'),
+      maxCells: z.number().int().min(1).max(500).default(50).describe('Maximum changed cells per page'),
+      offset: z.number().int().min(0).default(0).describe('Changed-cell offset from the previous page'),
     },
-    async ({ frameA, frameB, maxCells }) => {
+    async ({ frameA, frameB, maxCells, offset = 0 }) => {
       await ensureFreshBrowserState();
       const pm = getProjectManager();
       const state = pm.getState();
       
-      if (frameA < 0 || frameA >= state.frames.length || frameB < 0 || frameB >= state.frames.length) {
+      const frameCount = pm.isLayerMode() ? state.timelineConfig.durationFrames : state.frames.length;
+      if (frameA < 0 || frameA >= frameCount || frameB < 0 || frameB >= frameCount) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: 'Frame index out of range' }) }],
           isError: true,
         };
       }
       
-      const dataA = state.frames[frameA].data;
-      const dataB = state.frames[frameB].data;
+      const dataA = pm.getFrameAtTime(frameA).data;
+      const dataB = pm.getFrameAtTime(frameB).data;
       
       const allKeys = new Set([...Object.keys(dataA), ...Object.keys(dataB)]);
       const diffs: Array<{
@@ -396,7 +412,6 @@ export function registerPreviewTools(server: McpServer): void {
           diffs.push({ ...parseCellKey(key), before: cellA, after: cellB, change: 'modified' });
         }
         
-        if (diffs.length >= maxCells) break;
       }
       
       const summary = {
@@ -404,6 +419,9 @@ export function registerPreviewTools(server: McpServer): void {
         removed: diffs.filter(d => d.change === 'removed').length,
         modified: diffs.filter(d => d.change === 'modified').length,
       };
+      diffs.sort((a, b) => a.y - b.y || a.x - b.x);
+      const page = diffs.slice(offset, offset + maxCells);
+      const nextOffset = offset + page.length < diffs.length ? offset + page.length : null;
       
       return {
         content: [{ 
@@ -412,9 +430,11 @@ export function registerPreviewTools(server: McpServer): void {
             frameA,
             frameB,
             totalDiffs: diffs.length,
-            truncated: diffs.length >= maxCells,
+            returnedCount: page.length,
+            truncated: nextOffset !== null,
+            nextOffset,
             summary,
-            diffs,
+            diffs: page,
           }) 
         }],
       };
@@ -507,6 +527,8 @@ export async function getCanvasRender(
 ): Promise<CanvasRenderToolResult> {
   await dependencies.ensureFreshState();
   const state = dependencies.getState();
+  const frameCount = dependencies.getFrameCount?.() ?? state.frames.length;
+  const frameAt = (index: number): Frame => dependencies.getFrameAtTime?.(index) ?? state.frames[index];
   const allFrames = input.allFrames ?? false;
 
   if (allFrames && input.frameIndex !== undefined) {
@@ -518,26 +540,26 @@ export async function getCanvasRender(
     return canvasRenderError(`maxWidth must be an integer between 1 and ${MAX_CANVAS_RENDER_WIDTH}.`);
   }
 
-  if (state.frames.length === 0) {
+  if (frameCount === 0) {
     return canvasRenderError('The project has no frames to render.');
   }
 
   let selections: AnsiFrameSelection[];
   if (allFrames) {
-    if (state.frames.length > limits.maxFrames) {
+    if (frameCount > limits.maxFrames) {
       return canvasRenderError(
-        `Cannot render all ${state.frames.length} frames: allFrames is limited to ${limits.maxFrames} frames. Use frameIndex to render one frame.`
+        `Cannot render all ${frameCount} frames: allFrames is limited to ${limits.maxFrames} frames. Use frameIndex to render one frame.`
       );
     }
-    selections = state.frames.map((frame, index) => ({ frame, index }));
+    selections = Array.from({ length: frameCount }, (_, index) => ({ frame: frameAt(index), index }));
   } else {
     const frameIndex = input.frameIndex ?? state.currentFrameIndex;
-    if (!Number.isInteger(frameIndex) || frameIndex < 0 || frameIndex >= state.frames.length) {
+    if (!Number.isInteger(frameIndex) || frameIndex < 0 || frameIndex >= frameCount) {
       return canvasRenderError(
-        `Frame index ${frameIndex} is out of range. Valid frame indexes are 0-${state.frames.length - 1}.`
+        `Frame index ${frameIndex} is out of range. Valid frame indexes are 0-${frameCount - 1}.`
       );
     }
-    selections = [{ frame: state.frames[frameIndex], index: frameIndex }];
+    selections = [{ frame: frameAt(frameIndex), index: frameIndex }];
   }
 
   const ansi = framesToAnsi(

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '../mcp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyExactCellChanges,
@@ -432,7 +432,7 @@ describe('acknowledged live tools', () => {
       index: 0,
       duration: 208,
     });
-    expect(state.frames[0].duration).toBe(250);
+    expect(state.frames[0].duration).toBe(300);
     expect(state.layers[0].contentFrames[0].durationFrames).toBe(3);
     expect(state.layers[0].contentFrames[1].startFrame).toBe(3);
     expect(state.timelineConfig.durationFrames).toBe(4);
@@ -441,7 +441,7 @@ describe('acknowledged live tools', () => {
       success: true,
       browserSynced: true,
       requestedDuration: 208,
-      newDuration: 250,
+      newDuration: 300,
       currentFrameIndex: 1,
     });
   });

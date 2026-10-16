@@ -14,8 +14,10 @@
  *   npx @modelcontextprotocol/inspector /path/to/run-server.sh
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { McpServer } from './mcp.js';
 import { getProjectManager, setWebSocketBroadcaster, setEnsureFreshStateCallback } from './state.js';
 import { HybridTransport } from './transport/index.js';
 import { setBrowserCommandCallback } from './live-sync.js';
@@ -45,6 +47,12 @@ import {
 } from './tools/index.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
+import { configureBrowserBridge } from './bridge.js';
+import { registerGeneratedOperationTools } from './tools/generated-operations.js';
+
+const { version } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 // =============================================================================
 // CLI Argument Parsing
@@ -61,7 +69,7 @@ interface CLIOptions {
 function parseArgs(): CLIOptions {
   const args = process.argv.slice(2);
   const options: CLIOptions = {
-    projectDir: process.cwd(),
+    projectDir: process.env.ASCII_MOTION_PROJECT_DIR ?? process.cwd(),
     help: false,
     version: false,
     live: false,
@@ -77,19 +85,29 @@ function parseArgs(): CLIOptions {
       options.version = true;
     } else if (arg === '--project-dir' || arg === '-d') {
       const nextArg = args[++i];
-      if (nextArg) {
-        options.projectDir = nextArg;
-      }
+      if (!nextArg || nextArg.startsWith('-')) throw new Error(`${arg} requires a path`);
+      options.projectDir = nextArg;
     } else if (arg === '--live' || arg === '-l') {
       options.live = true;
     } else if (arg === '--port' || arg === '-p') {
       const nextArg = args[++i];
-      if (nextArg) {
-        options.port = parseInt(nextArg, 10);
+      if (!nextArg || !/^\d+$/.test(nextArg)) throw new Error(`${arg} requires an integer port`);
+      options.port = Number(nextArg);
+      if (!Number.isSafeInteger(options.port) || options.port < 1 || options.port > 65535) {
+        throw new Error('Port must be an integer between 1 and 65535');
       }
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
     }
   }
 
+  if (!options.help && !options.version) {
+    if (!options.projectDir.trim()) throw new Error('Project directory must not be empty');
+    options.projectDir = resolve(options.projectDir);
+    if (!statSync(options.projectDir).isDirectory()) {
+      throw new Error(`Project directory is not a directory: ${options.projectDir}`);
+    }
+  }
   return options;
 }
 
@@ -127,16 +145,17 @@ EXAMPLES:
   npx @modelcontextprotocol/inspector /path/to/run-server.sh
 
 LIVE MODE:
-  When --live is enabled, a WebSocket server starts on 127.0.0.1.
-  The auth token is printed to stderr. Use this token to connect
-  your browser to the MCP server for real-time synchronization.
+  The host-owned process listens on 127.0.0.1. In the same AI session,
+  call get_auth_token and get_connection_status, then connect the app.
+  Do not start a second terminal server to obtain its token.
+  Bridge v3 requires a matching app build. Node.js 22 or 24 is recommended.
 
   Connect URL: ws://127.0.0.1:PORT/?token=AUTH_TOKEN
 
-AVAILABLE TOOLS (78+ total):
-  Canvas (8), Frames (7), Project (6), Preview (6), Animation (5),
-  Selection (6), History (3), Export (11), Import (3), Effects (4),
-  Generators (2), Layers (17)
+AVAILABLE TOOLS:
+  Use tools/list for current schemas and get_capabilities for the connected
+  app. Existing tools are retained alongside schema-derived v3 operations.
+  Large results and exports use bounded artifact pages.
 
 For detailed documentation, visit:
   https://github.com/CameronFoxly/ascii-motion-mcp
@@ -144,33 +163,17 @@ For detailed documentation, visit:
 }
 
 function showVersion(): void {
-  console.log('ascii-motion-mcp v2.3.0');
+  console.log(`ascii-motion-mcp v${version}`);
 }
 
 // =============================================================================
 // Server Setup
 // =============================================================================
 
-async function main(): Promise<void> {
-  const options = parseArgs();
-
-  if (options.help) {
-    showHelp();
-    process.exit(0);
-  }
-
-  if (options.version) {
-    showVersion();
-    process.exit(0);
-  }
-
-  // Set project directory in environment for tools to use
-  process.env.ASCII_MOTION_PROJECT_DIR = options.projectDir;
-
-  // Create the MCP server
+function buildServer(): McpServer {
   const server = new McpServer({
     name: 'ascii-motion-mcp',
-    version: '2.3.0',
+    version,
   });
 
   // Register all tools
@@ -192,6 +195,7 @@ async function main(): Promise<void> {
   registerLayerTools(server);
   registerConnectionTools(server);
   registerBrowserExportTools(server);
+  registerGeneratedOperationTools(server);
 
   // Register resources
   registerResources(server);
@@ -199,13 +203,24 @@ async function main(): Promise<void> {
   // Register prompts
   registerPrompts(server);
 
+  return server;
+}
+
+async function main(): Promise<void> {
+  const options = parseArgs();
+  if (options.help) return showHelp();
+  if (options.version) return showVersion();
+
+  process.env.ASCII_MOTION_PROJECT_DIR = options.projectDir;
+
   // Initialize project manager
   getProjectManager();
 
-  // Set up live mode if enabled
   let hybridTransport: HybridTransport | null = null;
-
-  if (options.live) {
+  let liveStartup: Promise<void> | undefined;
+  let closing = false;
+  async function startLive(): Promise<void> {
+    if (!options.live || closing) return;
     hybridTransport = new HybridTransport(options.port, '127.0.0.1');
 
     // Set up WebSocket broadcaster for state changes
@@ -223,6 +238,7 @@ async function main(): Promise<void> {
 
     // Start WebSocket server
     await hybridTransport.startWebSocket();
+    configureBrowserBridge(hybridTransport.wsServer);
 
     // Handle state snapshots from browser (syncs browser state to MCP)
     hybridTransport.wsServer.onStateSnapshot = (snapshot: unknown) => {
@@ -255,34 +271,63 @@ async function main(): Promise<void> {
 
     console.error(`[ascii-motion-mcp] Live mode enabled`);
     console.error(`[ascii-motion-mcp] WebSocket URL: ws://127.0.0.1:${options.port}`);
-    console.error(`[ascii-motion-mcp] Auth Token: ${hybridTransport.authToken}`);
+    console.error('[ascii-motion-mcp] Obtain this instance\'s token with get_auth_token in your MCP host.');
     console.error(`[ascii-motion-mcp] Session ID: ${hybridTransport.sessionId}`);
     console.error('');
     console.error(`[ascii-motion-mcp] Browser connect URL:`);
-    console.error(`  ws://127.0.0.1:${options.port}/?token=${hybridTransport.authToken}`);
+    console.error(`  ws://127.0.0.1:${options.port}/?token=<token from get_auth_token>`);
   }
 
   // Log startup (to stderr so it doesn't interfere with MCP protocol)
   console.error(`[ascii-motion-mcp] Starting server...`);
   console.error(`[ascii-motion-mcp] Project directory: ${options.projectDir}`);
 
-  // Connect via stdio transport (for MCP protocol)
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const handle = serveStdio(buildServer, {
+    legacy: 'serve',
+    transport,
+    onerror: (error) => console.error('[ascii-motion-mcp] Protocol error:', error),
+  });
 
-  console.error(`[ascii-motion-mcp] Server connected and ready`);
+  // SDK auto-negotiation may spawn a disposable discovery process. Bind the
+  // process-owned browser bridge only once actual session traffic arrives.
+  const dispatch = transport.onmessage;
+  transport.onmessage = (message) => {
+    if (!('method' in message) || message.method === 'server/discover') {
+      dispatch?.(message);
+      return;
+    }
+    liveStartup ??= startLive();
+    void liveStartup.then(() => {
+      if (!closing) dispatch?.(message);
+    }).catch((error: unknown) => {
+      console.error('[ascii-motion-mcp] Live startup failed:', error);
+      void shutdown(1);
+    });
+  };
 
-  // Handle shutdown
-  const shutdown = async () => {
+  const shutdown = async (exitCode = 0): Promise<void> => {
+    if (closing) return;
+    closing = true;
     console.error('[ascii-motion-mcp] Shutting down...');
+    await liveStartup?.catch(() => undefined);
+    await handle.close();
     if (hybridTransport) {
       await hybridTransport.stopWebSocket();
     }
-    process.exit(0);
+    process.exitCode = exitCode;
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  const connectionClosed = transport.onclose;
+  transport.onclose = () => {
+    connectionClosed?.();
+    void shutdown();
+  };
+  process.once('SIGINT', () => { void shutdown(); });
+  process.once('SIGTERM', () => { void shutdown(); });
+  process.stdin.once('end', () => { void shutdown(); });
+  process.stdin.once('close', () => { void shutdown(); });
+  console.error(`[ascii-motion-mcp] Server connected and ready`);
 }
 
 // Handle uncaught errors

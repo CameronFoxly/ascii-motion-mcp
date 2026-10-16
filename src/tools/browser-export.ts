@@ -15,7 +15,7 @@ import { z } from 'zod';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import type { ExportRequest, ExportResult } from '../transport/websocket.js';
 
 // Export request callback - set by index.ts when live mode is enabled

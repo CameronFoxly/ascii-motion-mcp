@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager } from '../state.js';
 import {
   applyExactCellChanges,
@@ -55,7 +55,7 @@ export function registerImportTools(server: McpServer): void {
   // ==========================================================================
   server.tool(
     'import_image',
-    'Import an image file and convert it to ASCII art on the canvas. Requires optional "sharp" or "jimp" package for image processing.',
+    'Convert an image through the connected app, overlaying non-empty cells on the targeted content frame. Use import_media for a new layer, replacement or native palette options. Headless mode requires optional sharp or jimp.',
     {
       filePath: z.string().describe('Path to the image file (.png, .jpg, .gif, .bmp)'),
       targetWidth: z.number().int().optional().describe('Target width in characters. If omitted, uses canvas width.'),
@@ -174,7 +174,7 @@ export function registerImportTools(server: McpServer): void {
   // ==========================================================================
   server.tool(
     'import_video',
-    'Import a video file and convert each frame to ASCII art animation. Requires ffmpeg and optional image processing package.',
+    'Import video frames through the connected app with an explicit sampling rate and time window. Headless video import is not supported.',
     {
       filePath: z.string().describe('Path to the video file (.mp4, .webm, .mov, .gif)'),
       targetWidth: z.number().int().optional().describe('Target width in characters. If omitted, uses canvas width.'),

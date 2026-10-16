@@ -5,32 +5,25 @@
  */
 
 import { z } from 'zod';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '../mcp.js';
 import { getProjectManager, broadcastStateChange, ProjectStateManager } from '../state.js';
 import { requestBrowserCommand, requireFreshBrowserState } from '../live-sync.js';
 import type { BrowserCommandResult } from '../transport/websocket.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { getProjectDirectory, validateProjectPath } from '../project-path.js';
+
+export const PROJECT_TEMPLATES = {
+  'terminal-80x24': { width: 80, height: 24 },
+  'wide-120x30': { width: 120, height: 30 },
+  'square-40x40': { width: 40, height: 40 },
+  'small-32x16': { width: 32, height: 16 },
+  'large-160x50': { width: 160, height: 50 },
+};
 
 // Get the project directory from environment or use current working directory
 function getProjectDir(): string {
-  return process.env.ASCII_MOTION_PROJECT_DIR || process.cwd();
-}
-
-// Validate that a path is within the allowed project directory
-function validatePath(filePath: string): { valid: boolean; resolved: string; error?: string } {
-  const projectDir = getProjectDir();
-  const resolved = path.resolve(projectDir, filePath);
-  
-  if (!resolved.startsWith(projectDir)) {
-    return {
-      valid: false,
-      resolved,
-      error: `Path "${filePath}" is outside the allowed project directory`,
-    };
-  }
-  
-  return { valid: true, resolved };
+  return getProjectDirectory();
 }
 
 export function registerProjectTools(server: McpServer): void {
@@ -49,36 +42,9 @@ export function registerProjectTools(server: McpServer): void {
     async ({ width, height, name, template }) => {
       const pm = getProjectManager();
       
-      // Handle templates
-      let finalWidth = width;
-      let finalHeight = height;
+      const dimensions = template ? PROJECT_TEMPLATES[template] : { width, height };
       
-      if (template) {
-        switch (template) {
-          case 'terminal-80x24':
-            finalWidth = 80;
-            finalHeight = 24;
-            break;
-          case 'wide-120x30':
-            finalWidth = 120;
-            finalHeight = 30;
-            break;
-          case 'square-40x40':
-            finalWidth = 40;
-            finalHeight = 40;
-            break;
-          case 'small-32x16':
-            finalWidth = 32;
-            finalHeight = 16;
-            break;
-          case 'large-160x50':
-            finalWidth = 160;
-            finalHeight = 50;
-            break;
-        }
-      }
-      
-      pm.newProject({ width: finalWidth, height: finalHeight, name });
+      pm.newProject({ ...dimensions, name });
       
       const state = pm.getState();
       
@@ -124,7 +90,7 @@ export function registerProjectTools(server: McpServer): void {
         filePath = filePath + '.asciimtn';
       }
       
-      const validation = validatePath(filePath);
+      const validation = await validateProjectPath(filePath);
       if (!validation.valid) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: validation.error }) }],
@@ -133,13 +99,15 @@ export function registerProjectTools(server: McpServer): void {
       }
       
       try {
+        const browserRefreshed = await requireFreshBrowserState();
+        if (browserRefreshed && !pm.hasCompleteBrowserDocument()) {
+          throw new Error('The connected app cannot supply a complete native document. Update ASCII Motion before saving.');
+        }
         // Ensure directory exists
         const dir = path.dirname(validation.resolved);
         await fs.mkdir(dir, { recursive: true });
         
-        const sessionData = pm.isLayerMode()
-          ? pm.toSessionDataV2()
-          : pm.toSessionData();
+        const sessionData = pm.toNativeSessionData();
         const json = JSON.stringify(sessionData, null, 2);
         
         await fs.writeFile(validation.resolved, json, 'utf-8');
@@ -181,7 +149,7 @@ export function registerProjectTools(server: McpServer): void {
     },
     async ({ filePath }) => {
       let browserApplied = false;
-      const validation = validatePath(filePath);
+      const validation = await validateProjectPath(filePath);
       if (!validation.valid) {
         return {
           content: [{ type: 'text', text: JSON.stringify({ error: validation.error }) }],
@@ -313,11 +281,7 @@ export function registerProjectTools(server: McpServer): void {
     },
     async ({ name }) => {
       const pm = getProjectManager();
-      // State updated directly
-      
-      // Direct state modification (would need to add a method to ProjectStateManager)
-      (pm as unknown as { state: { name: string; isDirty: boolean } }).state.name = name;
-      (pm as unknown as { state: { isDirty: boolean } }).state.isDirty = true;
+      pm.setProjectMetadata({ name });
       
       broadcastStateChange('set_project_name', { name });
       

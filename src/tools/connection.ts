@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '../mcp.js';
 
 // State request callback - will be set by index.ts
 let requestBrowserStateCallback: (() => Promise<boolean>) | null = null;
