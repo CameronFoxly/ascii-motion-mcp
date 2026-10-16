@@ -144,7 +144,7 @@ For detailed documentation, visit:
 }
 
 function showVersion(): void {
-  console.log('ascii-motion-mcp v2.2.0');
+  console.log('ascii-motion-mcp v2.3.0');
 }
 
 // =============================================================================
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   // Create the MCP server
   const server = new McpServer({
     name: 'ascii-motion-mcp',
-    version: '2.2.0',
+    version: '2.3.0',
   });
 
   // Register all tools

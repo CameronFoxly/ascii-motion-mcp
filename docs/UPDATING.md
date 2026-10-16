@@ -33,7 +33,7 @@ npm install -g ascii-motion-mcp@latest
 ### Option 3: Install Specific Version
 
 ```bash
-npm install -g ascii-motion-mcp@0.2.0
+npm install -g ascii-motion-mcp@2.2.0
 ```
 
 ## After Updating
